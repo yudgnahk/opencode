@@ -14,7 +14,7 @@ All providers are integrated through a common `Provider` interface, with automat
 
 ## Authentication
 
-OpenCode Go supports multiple authentication methods for AI providers through the `auth` package. Authentication credentials are stored securely in `~/.opencode/data/auth.json` with restricted file permissions (0o600).
+OpenCode Go supports multiple authentication methods for AI providers through the `auth` package. Authentication credentials are stored securely in `~/.local/share/opencode/auth.json` with restricted file permissions (0o600).
 
 ### Authentication Types
 
@@ -58,11 +58,13 @@ auth.Set("gemini", auth.WellKnown{
 
 ### Storage Location
 
-Auth credentials are stored in:
+Auth credentials are stored in the XDG data directory:
 
 ```
-~/.opencode/data/auth.json
+~/.local/share/opencode/auth.json
 ```
+
+Or use `$XDG_DATA_HOME/opencode/auth.json` if `XDG_DATA_HOME` is set.
 
 File format:
 

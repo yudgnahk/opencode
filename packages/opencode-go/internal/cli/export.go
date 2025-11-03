@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/opencode/opencode-go/internal/config"
 	"github.com/opencode/opencode-go/internal/session"
 	"github.com/opencode/opencode-go/internal/storage"
 	"github.com/spf13/cobra"
@@ -27,14 +28,8 @@ var exportCmd = &cobra.Command{
 		sessionID := args[0]
 		ctx := context.Background()
 
-		// Get storage path
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Printf("Error getting home directory: %v\n", err)
-			os.Exit(1)
-		}
-
-		storageDir := filepath.Join(home, ".opencode", "storage")
+		// Get storage path from XDG data directory
+		storageDir := filepath.Join(config.GetDataDir(), "storage")
 		store, err := storage.New(storageDir)
 		if err != nil {
 			fmt.Printf("Error opening storage: %v\n", err)

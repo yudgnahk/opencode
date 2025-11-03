@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/opencode/opencode-go/internal/config"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -14,7 +15,14 @@ type Storage struct {
 	db *bolt.DB
 }
 
+// New creates a new storage instance
+// If path is empty, uses the default location in XDG_DATA_HOME/opencode/storage
 func New(path string) (*Storage, error) {
+	// Use default path if not provided
+	if path == "" {
+		path = filepath.Join(config.GetDataDir(), "storage", "opencode.db")
+	}
+
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
@@ -30,6 +38,7 @@ func New(path string) (*Storage, error) {
 	}
 
 	// Create buckets
+	// This matches the structure in TypeScript: session, message, project
 	err = db.Update(func(tx *bolt.Tx) error {
 		buckets := []string{"sessions", "messages", "projects", "config"}
 		for _, bucket := range buckets {

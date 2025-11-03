@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/opencode/opencode-go/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,11 @@ func init() {
 }
 
 func Execute() error {
+	// Initialize XDG directories before running any command
+	// This matches the TypeScript version which creates directories on startup
+	if err := config.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize directories: %w", err)
+	}
 	return rootCmd.Execute()
 }
 

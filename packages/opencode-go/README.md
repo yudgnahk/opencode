@@ -36,6 +36,25 @@ packages/opencode-go/
 └── README.md
 ```
 
+## XDG Base Directory Support
+
+OpenCode Go follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for storing files:
+
+- **Data**: `~/.local/share/opencode` (or `$XDG_DATA_HOME/opencode`)
+  - Database: `~/.local/share/opencode/storage/opencode.db`
+  - Auth tokens: `~/.local/share/opencode/auth.json`
+  - Logs: `~/.local/share/opencode/log/`
+  - Binaries: `~/.local/share/opencode/bin/`
+
+- **Config**: `~/.config/opencode` (or `$XDG_CONFIG_HOME/opencode`)
+  - Config files: `~/.config/opencode/config.json`, `opencode.yml`, etc.
+
+- **Cache**: `~/.cache/opencode` (or `$XDG_CACHE_HOME/opencode`)
+  - Cached data (auto-cleared on version updates)
+
+- **State**: `~/.local/state/opencode` (or `$XDG_STATE_HOME/opencode`)
+  - Runtime state and temporary data
+
 ## Requirements
 
 - Go 1.21 or later
@@ -70,10 +89,40 @@ The server will start on `localhost:8080` by default.
 The server can be configured via:
 
 1. **Configuration file** (checked in order):
+   - `~/.config/opencode/config.json`
+   - `~/.config/opencode/opencode.json`
+   - `~/.config/opencode/opencode.jsonc` (JSON with comments)
+   - `./opencode.json`
+   - `./opencode.jsonc`
+   - `~/.config/opencode/config.yml`
    - `./opencode.yml`
    - `./opencode.yaml`
-   - `~/.config/opencode/config.yml`
-   - `~/.opencode.yml`
+
+Example `opencode.json`:
+
+```json
+{
+  "server": {
+    "host": "localhost",
+    "port": 8080
+  },
+  "storage": {
+    "path": "~/.local/share/opencode/storage/opencode.db"
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "your-api-key",
+      "baseUrl": "https://api.anthropic.com",
+      "model": "claude-3-5-sonnet-20241022"
+    },
+    "openai": {
+      "apiKey": "your-api-key",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4"
+    }
+  }
+}
+```
 
 Example `opencode.yml`:
 
@@ -83,7 +132,7 @@ server:
   port: 8080
 
 storage:
-  path: ~/.opencode/storage/opencode.db
+  path: ~/.local/share/opencode/storage/opencode.db
 
 providers:
   anthropic:
@@ -252,9 +301,10 @@ Phase 1 includes 48 stub endpoints:
 
 The server uses BoltDB for persistent storage:
 
-- Default location: `~/.opencode/storage/opencode.db`
+- Default location: `~/.local/share/opencode/storage/opencode.db`
 - Buckets: `sessions`, `messages`, `projects`, `config`
 - Automatic bucket creation on startup
+- Cache versioning: Cache automatically cleared when version changes (current: v9)
 
 ## Graceful Shutdown
 
@@ -286,8 +336,8 @@ OPENCODE_PORT=8081 go run ./cmd/server/main.go
 
 ```bash
 # Ensure storage directory is writable
-mkdir -p ~/.opencode/storage
-chmod 755 ~/.opencode/storage
+mkdir -p ~/.local/share/opencode/storage
+chmod 755 ~/.local/share/opencode/storage
 ```
 
 ### Module errors
