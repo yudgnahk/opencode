@@ -5,16 +5,25 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/opencode/opencode-go/internal/project"
 	"github.com/opencode/opencode-go/internal/storage"
+	"github.com/opencode/opencode-go/internal/tool"
 )
 
 type Server struct {
 	storage *storage.Storage
+	tools   *tool.ToolExecutor
+	project *project.Project
 }
 
-func New(storage *storage.Storage) *Server {
+func New(storage *storage.Storage, workingDir string) *Server {
+	// Detect project
+	proj, _ := project.Detect(workingDir)
+
 	return &Server{
 		storage: storage,
+		tools:   tool.NewToolExecutor(workingDir),
+		project: proj,
 	}
 }
 
@@ -89,16 +98,37 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Project stubs
+// Project handlers
 func (s *Server) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	if s.project == nil {
+		http.Error(w, "No project detected", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": "stub"})
+	json.NewEncoder(w).Encode(s.project)
 }
 
 func (s *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	proj, err := project.Detect(req.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.project = proj
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(proj)
 }
 
 // Session stubs
@@ -187,40 +217,109 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// File operation stubs
+// File operation handlers
 func (s *Server) handleFilesRead(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req tool.ReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Read(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"content": ""})
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleFilesWrite(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req tool.WriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Write(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleFilesEdit(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
-	w.WriteHeader(http.StatusOK)
+	var req tool.EditRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Edit(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleFilesGlob(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req tool.GlobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Glob(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]string{})
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleFilesGrep(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req tool.GrepRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Grep(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
+	json.NewEncoder(w).Encode(resp)
 }
 
-// Bash stub
+// Bash handler
 func (s *Server) handleBashExecute(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 2
+	var req tool.BashRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.Bash(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"output": ""})
+	json.NewEncoder(w).Encode(resp)
 }
 
 // LSP stubs

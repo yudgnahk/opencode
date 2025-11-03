@@ -49,8 +49,14 @@ func main() {
 		MaxAge:           300,
 	}))
 
+	// Get current working directory
+	workingDir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create server and register routes
-	srv := server.New(store)
+	srv := server.New(store, workingDir)
 	srv.RegisterRoutes(r)
 
 	// HTTP server address
