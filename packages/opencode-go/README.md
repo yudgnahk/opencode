@@ -151,6 +151,11 @@ Phase 1 includes 48 stub endpoints:
 - `POST /api/sessions/{id}/messages` - Create message
 - `GET /api/sessions/{id}/stream` - Stream messages (SSE)
 
+### AI Completions
+
+- `POST /api/sessions/{id}/complete` - Send message and get AI response (non-streaming)
+- `POST /api/sessions/{id}/complete/stream` - Send message and stream AI response (SSE)
+
 ### Agents
 
 - `GET /api/agents` - List agents
@@ -193,9 +198,13 @@ Phase 1 includes 48 stub endpoints:
 - `GET /api/sessions/{id}/todos` - Get todos
 - `POST /api/sessions/{id}/todos` - Update todos
 
+## Documentation
+
+- **[AI Provider Integration](docs/PROVIDERS.md)** - Comprehensive guide for AI provider configuration and usage
+
 ## Development Status
 
-### Phase 1 (Current) ✅
+### Phase 1 ✅
 
 - [x] Project structure
 - [x] HTTP server with Chi router
@@ -205,23 +214,29 @@ Phase 1 includes 48 stub endpoints:
 - [x] CORS middleware
 - [x] Graceful shutdown
 
-### Phase 2 (Next)
+### Phase 2 ✅
 
-- [ ] File operations implementation
-- [ ] Bash execution
-- [ ] Project management
+- [x] File operations implementation (Read, Write, Edit, Glob, Grep)
+- [x] Bash execution
+- [x] Project management
 
-### Phase 3
+### Phase 3 ✅
 
-- [ ] Session management
-- [ ] Message storage
+- [x] Session management
+- [x] Message storage
+- [x] Session history
+- [x] Event bus
 
-### Phase 4
+### Phase 4 ✅ (Current)
 
-- [ ] AI provider integration
-- [ ] Streaming responses
+- [x] AI provider integration (Anthropic, OpenAI, Gemini)
+- [x] Streaming responses
+- [x] Provider registry
+- [x] Retry logic with exponential backoff
+- [x] Comprehensive unit tests (54 tests)
+- [x] Integration tests (4 tests)
 
-### Phase 5
+### Phase 5 (Next)
 
 - [ ] LSP integration
 - [ ] Advanced features

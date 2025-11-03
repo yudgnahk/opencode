@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -16,19 +16,45 @@ import (
 	"github.com/opencode/opencode-go/internal/config"
 	"github.com/opencode/opencode-go/internal/server"
 	"github.com/opencode/opencode-go/internal/storage"
+	"github.com/spf13/cobra"
 )
 
-func main() {
+var (
+	serveHost string
+	servePort int
+)
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start the OpenCode HTTP server",
+	Long:  `Starts the OpenCode HTTP API server that can be used by IDEs and other clients.`,
+	RunE:  runServe,
+}
+
+func init() {
+	serveCmd.Flags().StringVar(&serveHost, "host", "127.0.0.1", "Host to bind the server to")
+	serveCmd.Flags().IntVar(&servePort, "port", 8080, "Port to bind the server to")
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Override with command-line flags if provided
+	if cmd.Flags().Changed("host") {
+		cfg.Server.Host = serveHost
+	}
+	if cmd.Flags().Changed("port") {
+		cfg.Server.Port = servePort
 	}
 
 	// Initialize storage
 	store, err := storage.New(cfg.Storage.Path)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
 	defer store.Close()
 
@@ -52,7 +78,7 @@ func main() {
 	// Get current working directory
 	workingDir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get working directory: %v", err)
+		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	// Create server
@@ -79,7 +105,7 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Starting OpenCode Go server on %s", addr)
+		log.Printf("Starting OpenCode server on %s", addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
@@ -93,12 +119,13 @@ func main() {
 	log.Println("Shutting down server...")
 
 	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
 	log.Println("Server exited")
+	return nil
 }

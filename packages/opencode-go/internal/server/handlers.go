@@ -1,86 +1,192 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/opencode/opencode-go/internal/auth"
+	"github.com/opencode/opencode-go/internal/config"
 	"github.com/opencode/opencode-go/internal/project"
+	"github.com/opencode/opencode-go/internal/provider"
+	"github.com/opencode/opencode-go/internal/session"
 	"github.com/opencode/opencode-go/internal/storage"
 	"github.com/opencode/opencode-go/internal/tool"
 )
 
 type Server struct {
-	storage *storage.Storage
-	tools   *tool.ToolExecutor
-	project *project.Project
+	storage           *storage.Storage
+	tools             *tool.ToolExecutor
+	project           *project.Project
+	sessionManager    *session.Manager
+	providerRegistry  *provider.Registry
+	completionService *session.CompletionService
+	workingDir        string
 }
 
 func New(storage *storage.Storage, workingDir string) *Server {
 	// Detect project
 	proj, _ := project.Detect(workingDir)
 
+	// Create session manager
+	sessionMgr := session.NewManager(storage)
+
+	// Create provider registry
+	registry := provider.NewRegistry()
+
+	// Create completion service
+	completionSvc := session.NewCompletionService(sessionMgr, registry)
+
 	return &Server{
-		storage: storage,
-		tools:   tool.NewToolExecutor(workingDir),
-		project: proj,
+		storage:           storage,
+		tools:             tool.NewToolExecutor(workingDir),
+		project:           proj,
+		sessionManager:    sessionMgr,
+		providerRegistry:  registry,
+		completionService: completionSvc,
+		workingDir:        workingDir,
 	}
+}
+
+func (s *Server) InitProviders(ctx context.Context) error {
+	retryConfig := provider.DefaultRetryConfig()
+
+	// Helper to get API key from auth system or env var
+	getAPIKey := func(providerID, envVar string) string {
+		// Check auth system first
+		authInfo, err := auth.Get(providerID)
+		if err == nil && authInfo != nil {
+			if apiAuth, ok := authInfo.(auth.API); ok && apiAuth.Key != "" {
+				return apiAuth.Key
+			}
+		}
+		// Fall back to environment variable
+		return os.Getenv(envVar)
+	}
+
+	// Helper to register or update a provider
+	registerProvider := func(p provider.Provider) error {
+		name := p.Name()
+		// Unregister if already exists
+		s.providerRegistry.Unregister(name)
+		// Register the new/updated provider
+		return s.providerRegistry.Register(p)
+	}
+
+	// Initialize Anthropic provider with retry
+	if apiKey := getAPIKey("anthropic", "ANTHROPIC_API_KEY"); apiKey != "" {
+		anthropic := provider.NewAnthropic(apiKey)
+		wrapped := provider.NewRetryableProvider(anthropic, retryConfig)
+		if err := registerProvider(wrapped); err != nil {
+			return fmt.Errorf("failed to register anthropic: %w", err)
+		}
+	}
+
+	// Initialize OpenAI provider with retry
+	if apiKey := getAPIKey("openai", "OPENAI_API_KEY"); apiKey != "" {
+		openai := provider.NewOpenAI(apiKey)
+		wrapped := provider.NewRetryableProvider(openai, retryConfig)
+		if err := registerProvider(wrapped); err != nil {
+			return fmt.Errorf("failed to register openai: %w", err)
+		}
+	}
+
+	// Initialize Gemini provider with retry
+	if apiKey := getAPIKey("gemini", "GEMINI_API_KEY"); apiKey != "" {
+		gemini, err := provider.NewGemini(ctx, apiKey)
+		if err != nil {
+			return fmt.Errorf("failed to create gemini provider: %w", err)
+		}
+		wrapped := provider.NewRetryableProvider(gemini, retryConfig)
+		if err := registerProvider(wrapped); err != nil {
+			return fmt.Errorf("failed to register gemini: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) RegisterRoutes(r chi.Router) {
 	// Health & Status
 	r.Get("/health", s.handleHealth)
-	r.Get("/api/status", s.handleStatus)
+	r.Get("/status", s.handleStatus)
+
+	// Path
+	r.Get("/path", s.handlePath)
 
 	// Project
-	r.Get("/api/project/current", s.handleProjectCurrent)
-	r.Post("/api/project/init", s.handleProjectInit)
+	r.Get("/project/current", s.handleProjectCurrent)
+	r.Post("/project/init", s.handleProjectInit)
 
 	// Sessions
-	r.Get("/api/sessions", s.handleSessionsList)
-	r.Post("/api/sessions", s.handleSessionsCreate)
-	r.Get("/api/sessions/{id}", s.handleSessionsGet)
-	r.Delete("/api/sessions/{id}", s.handleSessionsDelete)
-	r.Post("/api/sessions/{id}/fork", s.handleSessionsFork)
+	r.Get("/session", s.handleSessionsList)
+	r.Post("/session", s.handleSessionsCreate)
+	r.Get("/session/{id}", s.handleSessionsGet)
+	r.Delete("/session/{id}", s.handleSessionsDelete)
+	r.Post("/session/{id}/fork", s.handleSessionsFork)
 
 	// Messages
-	r.Get("/api/sessions/{id}/messages", s.handleMessagesGet)
-	r.Post("/api/sessions/{id}/messages", s.handleMessagesCreate)
-	r.Get("/api/sessions/{id}/stream", s.handleMessagesStream)
+	r.Get("/session/{id}/messages", s.handleMessagesGet)
+	r.Post("/session/{id}/messages", s.handleMessagesCreate)
+	r.Get("/session/{id}/stream", s.handleMessagesStream)
+
+	// AI Completions
+	r.Post("/session/{id}/complete", s.handleAIComplete)
+	r.Post("/session/{id}/complete/stream", s.handleAICompleteStream)
 
 	// Agents
-	r.Get("/api/agents", s.handleAgentsList)
-	r.Get("/api/agents/{id}", s.handleAgentsGet)
+	r.Get("/agent", s.handleAgentsList)
+	r.Get("/agent/{id}", s.handleAgentsGet)
+
+	// Commands
+	r.Get("/command", s.handleCommandsList)
 
 	// Tools
-	r.Get("/api/tools", s.handleToolsList)
-	r.Post("/api/tools/{name}/execute", s.handleToolsExecute)
+	r.Get("/tool", s.handleToolsList)
+	r.Post("/tool/{name}/execute", s.handleToolsExecute)
 
 	// Configuration
-	r.Get("/api/config", s.handleConfigGet)
-	r.Post("/api/config", s.handleConfigUpdate)
+	r.Get("/config", s.handleConfigGet)
+	r.Post("/config", s.handleConfigUpdate)
 
 	// File operations
-	r.Post("/api/files/read", s.handleFilesRead)
-	r.Post("/api/files/write", s.handleFilesWrite)
-	r.Post("/api/files/edit", s.handleFilesEdit)
-	r.Post("/api/files/glob", s.handleFilesGlob)
-	r.Post("/api/files/grep", s.handleFilesGrep)
+	r.Get("/file/status", s.handleFilesStatus)
+	r.Post("/file/read", s.handleFilesRead)
+	r.Post("/file/write", s.handleFilesWrite)
+	r.Post("/file/edit", s.handleFilesEdit)
+	r.Post("/file/glob", s.handleFilesGlob)
+	r.Post("/file/grep", s.handleFilesGrep)
 
 	// Bash
-	r.Post("/api/bash/execute", s.handleBashExecute)
+	r.Post("/bash/execute", s.handleBashExecute)
 
 	// LSP
-	r.Post("/api/lsp/diagnostics", s.handleLSPDiagnostics)
-	r.Post("/api/lsp/hover", s.handleLSPHover)
+	r.Post("/lsp/diagnostics", s.handleLSPDiagnostics)
+	r.Post("/lsp/hover", s.handleLSPHover)
+
+	// Logging
+	r.Post("/log", s.handleLog)
+
+	// Events
+	r.Get("/event", s.handleEvent)
+
+	// TUI Control
+	r.Get("/tui/control/next", s.handleTuiControlNext)
+	r.Post("/tui/control/response", s.handleTuiControlResponse)
 
 	// Auth
-	r.Post("/api/auth/login", s.handleAuthLogin)
-	r.Post("/api/auth/logout", s.handleAuthLogout)
+	r.Get("/auth", s.handleAuthList)
+	r.Get("/auth/{provider}", s.handleAuthGet)
+	r.Put("/auth/{provider}", s.handleAuthSet)
+	r.Delete("/auth/{provider}", s.handleAuthDelete)
 
 	// Todos
-	r.Get("/api/sessions/{id}/todos", s.handleTodosGet)
-	r.Post("/api/sessions/{id}/todos", s.handleTodosUpdate)
+	r.Get("/session/{id}/todo", s.handleTodosGet)
+	r.Post("/session/{id}/todo", s.handleTodosUpdate)
 }
 
 // Stub implementations (return empty responses)
@@ -96,6 +202,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"version": "0.1.0-go",
 		"backend": "go",
 	})
+}
+
+func (s *Server) handlePath(w http.ResponseWriter, r *http.Request) {
+	response := map[string]string{
+		"directory": s.workingDir,
+	}
+
+	// Add state and config paths
+	response["state"] = config.GetStatePath()
+	response["config"] = config.GetConfigPath()
+
+	// Add worktree path if git is detected
+	if s.project != nil && s.project.Git != nil {
+		response["worktree"] = s.project.Git.Root
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // Project handlers
@@ -131,68 +255,223 @@ func (s *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(proj)
 }
 
-// Session stubs
+// Session handlers
 func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
+	projectID := r.URL.Query().Get("projectId")
+
+	sessions, err := s.sessionManager.List(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
+	json.NewEncoder(w).Encode(sessions)
 }
 
 func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
+	var req struct {
+		ProjectID string `json:"projectId"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	session, err := s.sessionManager.Create(r.Context(), req.ProjectID, req.Provider, req.Model)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": "stub-session"})
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(session)
 }
 
 func (s *Server) handleSessionsGet(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
 	sessionID := chi.URLParam(r, "id")
+
+	session, err := s.sessionManager.Get(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": sessionID})
+	json.NewEncoder(w).Encode(session)
 }
 
 func (s *Server) handleSessionsDelete(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
+	sessionID := chi.URLParam(r, "id")
+
+	if err := s.sessionManager.Delete(r.Context(), sessionID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleSessionsFork(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		FromMessageID string `json:"fromMessageId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	forked, err := s.sessionManager.Fork(r.Context(), sessionID, req.FromMessageID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": "stub-fork"})
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(forked)
 }
 
-// Message stubs
+// Message handlers
 func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 3
+	sessionID := chi.URLParam(r, "id")
+
+	messages, err := s.sessionManager.GetMessages(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
+	json.NewEncoder(w).Encode(messages)
 }
 
 func (s *Server) handleMessagesCreate(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 4
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		Role    session.Role           `json:"role"`
+		Content []session.ContentBlock `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	message, err := s.sessionManager.AddMessage(r.Context(), sessionID, req.Role, req.Content)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": "stub-message"})
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(message)
 }
 
 func (s *Server) handleMessagesStream(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 4 (SSE streaming)
+	sessionID := chi.URLParam(r, "id")
+
+	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Subscribe to events
+	eventCh := s.sessionManager.EventBus().Subscribe(sessionID)
+	defer s.sessionManager.EventBus().Unsubscribe(sessionID, eventCh)
+
+	// Send keepalive every 30 seconds
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case event := <-eventCh:
+			// Marshal event to JSON
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+
+			// Write SSE format
+			fmt.Fprintf(w, "event: %s\n", event.Type)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+
+		case <-ticker.C:
+			// Send keepalive
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+
+		case <-r.Context().Done():
+			// Client disconnected
+			return
+		}
+	}
 }
 
 // Agent stubs
 func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
+	// Return default built-in agents
+	agents := []map[string]interface{}{
+		{
+			"name":        "general",
+			"description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
+			"mode":        "subagent",
+			"builtIn":     true,
+			"permission": map[string]interface{}{
+				"edit": "allow",
+				"bash": map[string]string{
+					"*": "allow",
+				},
+				"webfetch": "allow",
+			},
+			"tools":   map[string]bool{},
+			"options": map[string]interface{}{},
+		},
+		{
+			"name":    "build",
+			"mode":    "primary",
+			"builtIn": true,
+			"permission": map[string]interface{}{
+				"edit": "allow",
+				"bash": map[string]string{
+					"*": "allow",
+				},
+				"webfetch": "allow",
+			},
+			"tools":   map[string]bool{},
+			"options": map[string]interface{}{},
+		},
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
+	json.NewEncoder(w).Encode(agents)
 }
 
 func (s *Server) handleAgentsGet(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"id": agentID})
+}
+
+// Command stubs
+func (s *Server) handleCommandsList(w http.ResponseWriter, r *http.Request) {
+	// Return empty array - commands are defined in config file
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode([]interface{}{})
 }
 
 // Tool stubs
@@ -218,6 +497,13 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // File operation handlers
+func (s *Server) handleFilesStatus(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement git diff status
+	// For now, return empty array
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode([]interface{}{})
+}
+
 func (s *Server) handleFilesRead(w http.ResponseWriter, r *http.Request) {
 	var req tool.ReadRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -335,13 +621,129 @@ func (s *Server) handleLSPHover(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{})
 }
 
-// Auth stubs
-func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+// Auth handlers
+
+// handleAuthList returns all stored authentication providers
+func (s *Server) handleAuthList(w http.ResponseWriter, r *http.Request) {
+	allAuth, err := auth.All()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to a simple map with provider names (masking sensitive data)
+	result := make(map[string]string)
+	for key, info := range allAuth {
+		result[key] = string(info.GetType())
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": "stub-token"})
+	json.NewEncoder(w).Encode(result)
 }
 
-func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+// handleAuthGet retrieves auth info for a specific provider (masked)
+func (s *Server) handleAuthGet(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "provider")
+
+	authInfo, err := auth.Get(providerID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if authInfo == nil {
+		http.Error(w, "provider not found", http.StatusNotFound)
+		return
+	}
+
+	// Return masked info (just type, not sensitive data)
+	result := map[string]string{
+		"provider": providerID,
+		"type":     string(authInfo.GetType()),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// handleAuthSet stores authentication credentials for a provider
+func (s *Server) handleAuthSet(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "provider")
+
+	// Parse the request body as raw JSON first
+	var rawData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&rawData); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Convert back to JSON for parsing
+	jsonData, err := json.Marshal(rawData)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Determine type and parse accordingly
+	typeStr, ok := rawData["type"].(string)
+	if !ok {
+		http.Error(w, "missing or invalid 'type' field", http.StatusBadRequest)
+		return
+	}
+
+	var authInfo auth.Info
+	switch auth.AuthType(typeStr) {
+	case auth.TypeAPI:
+		var api auth.API
+		if err := json.Unmarshal(jsonData, &api); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		authInfo = api
+	case auth.TypeOAuth:
+		var oauth auth.OAuth
+		if err := json.Unmarshal(jsonData, &oauth); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		authInfo = oauth
+	case auth.TypeWellKnown:
+		var wellknown auth.WellKnown
+		if err := json.Unmarshal(jsonData, &wellknown); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		authInfo = wellknown
+	default:
+		http.Error(w, "invalid auth type", http.StatusBadRequest)
+		return
+	}
+
+	// Store the auth info
+	if err := auth.Set(providerID, authInfo); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-initialize providers to pick up the new auth
+	if err := s.InitProviders(r.Context()); err != nil {
+		http.Error(w, fmt.Sprintf("failed to reinitialize providers: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// handleAuthDelete removes authentication credentials for a provider
+func (s *Server) handleAuthDelete(w http.ResponseWriter, r *http.Request) {
+	providerID := chi.URLParam(r, "provider")
+
+	if err := auth.Remove(providerID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -355,4 +757,151 @@ func (s *Server) handleTodosGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTodosUpdate(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement in Phase 5
 	w.WriteHeader(http.StatusOK)
+}
+
+// Log handler
+func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement proper logging
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(true)
+}
+
+// Event handler
+func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement event streaming
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Keep connection open
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+// TUI Control handlers
+func (s *Server) handleTuiControlNext(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement TUI control queue
+	// For now, just block to keep the connection open
+	<-r.Context().Done()
+}
+
+func (s *Server) handleTuiControlResponse(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement TUI control response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(true)
+}
+
+// AI Completion handlers
+
+func (s *Server) handleAIComplete(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Send message and get AI response
+	if err := s.completionService.SendMessage(r.Context(), sessionID, req.Content); err != nil {
+		http.Error(w, fmt.Sprintf("completion failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the latest message (the AI response)
+	messages, err := s.sessionManager.GetMessages(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(messages) == 0 {
+		http.Error(w, "no messages found", http.StatusInternalServerError)
+		return
+	}
+
+	lastMessage := messages[len(messages)-1]
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(lastMessage)
+}
+
+func (s *Server) handleAICompleteStream(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Start streaming
+	stream, err := s.completionService.StreamMessage(r.Context(), sessionID, req.Content)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("streaming failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer stream.Close()
+
+	// Stream chunks to client
+	for stream.Next() {
+		chunk := stream.Chunk()
+
+		// Convert chunk to JSON
+		data, err := json.Marshal(chunk)
+		if err != nil {
+			continue
+		}
+
+		// Write SSE format
+		fmt.Fprintf(w, "event: chunk\n")
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+
+		// Stop on final chunk
+		if chunk.Type == provider.ChunkTypeStop {
+			break
+		}
+	}
+
+	// Check for errors
+	if err := stream.Error(); err != nil {
+		errorData := map[string]string{"error": err.Error()}
+		data, _ := json.Marshal(errorData)
+		fmt.Fprintf(w, "event: error\n")
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
 }

@@ -2,8 +2,10 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -18,9 +20,13 @@ func New(path string) (*Storage, error) {
 		return nil, err
 	}
 
-	db, err := bolt.Open(path, 0600, nil)
+	// Open with timeout to detect if database is locked
+	opts := &bolt.Options{
+		Timeout: 1 * time.Second,
+	}
+	db, err := bolt.Open(path, 0600, opts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open database (is another process using it?): %w", err)
 	}
 
 	// Create buckets

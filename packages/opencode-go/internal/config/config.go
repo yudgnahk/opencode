@@ -68,7 +68,7 @@ func loadFromFile(path string) (*Config, error) {
 func defaultConfig() *Config {
 	cfg := &Config{
 		Server: ServerConfig{
-			Host: "localhost",
+			Host: "127.0.0.1",
 			Port: 8080,
 		},
 		Storage: StorageConfig{
@@ -110,4 +110,49 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Providers[providerName] = provider
 		}
 	}
+}
+
+// GetDataDir returns the path to the OpenCode data directory
+// This is where auth.json and other data files are stored
+func GetDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".opencode", "data")
+}
+
+// XDG base directory paths
+func getXDGDataHome() string {
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return xdg
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share")
+}
+
+func getXDGConfigHome() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return xdg
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config")
+}
+
+func getXDGStateHome() string {
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return xdg
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state")
+}
+
+// GetStatePath returns the XDG state directory for opencode
+func GetStatePath() string {
+	return filepath.Join(getXDGStateHome(), "opencode")
+}
+
+// GetConfigPath returns the XDG config directory for opencode
+func GetConfigPath() string {
+	return filepath.Join(getXDGConfigHome(), "opencode")
 }
