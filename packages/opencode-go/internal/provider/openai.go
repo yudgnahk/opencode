@@ -13,8 +13,9 @@ import (
 )
 
 type OpenAIProvider struct {
-	client openai.Client
-	apiKey string
+	client            openai.Client
+	apiKey            string
+	modelsDevRegistry ModelsDevRegistry
 }
 
 func NewOpenAI(apiKey string) *OpenAIProvider {
@@ -33,6 +34,15 @@ func (p *OpenAIProvider) Name() string {
 }
 
 func (p *OpenAIProvider) Models() []string {
+	// Try to get models from models.dev registry first
+	if p.modelsDevRegistry != nil {
+		models := p.modelsDevRegistry.GetModels("openai")
+		if len(models) > 0 {
+			return models
+		}
+	}
+
+	// Fallback to hardcoded list
 	return []string{
 		"gpt-4o",
 		"gpt-4o-2024-11-20",
@@ -45,6 +55,10 @@ func (p *OpenAIProvider) Models() []string {
 		"gpt-4",
 		"gpt-3.5-turbo",
 	}
+}
+
+func (p *OpenAIProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	p.modelsDevRegistry = registry
 }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {

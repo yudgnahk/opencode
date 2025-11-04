@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/opencode/opencode-go/internal/auth"
 	"github.com/opencode/opencode-go/internal/config"
+	"github.com/opencode/opencode-go/internal/modelsdev"
 	"github.com/opencode/opencode-go/internal/project"
 	"github.com/opencode/opencode-go/internal/provider"
 	"github.com/opencode/opencode-go/internal/session"
@@ -25,6 +26,7 @@ type Server struct {
 	project           *project.Project
 	sessionManager    *session.Manager
 	providerRegistry  *provider.Registry
+	modelsDevRegistry *modelsdev.Registry
 	completionService *session.CompletionService
 	workingDir        string
 }
@@ -48,6 +50,15 @@ func New(storage *storage.Storage, workingDir string) *Server {
 		projectID = proj.Name
 	}
 
+	// Initialize modelsdev registry
+	cacheDir := modelsdev.GetDefaultCacheDir()
+	modelsDevReg := modelsdev.NewRegistry(cacheDir)
+
+	// Try to load models.dev data (non-blocking, fallback to hardcoded if fails)
+	if err := modelsDevReg.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load models.dev: %v (using fallback models)\n", err)
+	}
+
 	return &Server{
 		storage:           storage,
 		tools:             tool.NewToolExecutor(workingDir, storage, registry, projectID),
@@ -55,6 +66,7 @@ func New(storage *storage.Storage, workingDir string) *Server {
 		project:           proj,
 		sessionManager:    sessionMgr,
 		providerRegistry:  registry,
+		modelsDevRegistry: modelsDevReg,
 		completionService: completionSvc,
 		workingDir:        workingDir,
 	}
@@ -88,6 +100,7 @@ func (s *Server) InitProviders(ctx context.Context) error {
 	// Initialize Anthropic provider with retry
 	if apiKey := getAPIKey("anthropic", "ANTHROPIC_API_KEY"); apiKey != "" {
 		anthropic := provider.NewAnthropic(apiKey)
+		anthropic.SetModelsDevRegistry(s.modelsDevRegistry)
 		wrapped := provider.NewRetryableProvider(anthropic, retryConfig)
 		if err := registerProvider(wrapped); err != nil {
 			return fmt.Errorf("failed to register anthropic: %w", err)
@@ -97,6 +110,7 @@ func (s *Server) InitProviders(ctx context.Context) error {
 	// Initialize OpenAI provider with retry
 	if apiKey := getAPIKey("openai", "OPENAI_API_KEY"); apiKey != "" {
 		openai := provider.NewOpenAI(apiKey)
+		openai.SetModelsDevRegistry(s.modelsDevRegistry)
 		wrapped := provider.NewRetryableProvider(openai, retryConfig)
 		if err := registerProvider(wrapped); err != nil {
 			return fmt.Errorf("failed to register openai: %w", err)
@@ -109,9 +123,33 @@ func (s *Server) InitProviders(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create gemini provider: %w", err)
 		}
+		gemini.SetModelsDevRegistry(s.modelsDevRegistry)
 		wrapped := provider.NewRetryableProvider(gemini, retryConfig)
 		if err := registerProvider(wrapped); err != nil {
 			return fmt.Errorf("failed to register gemini: %w", err)
+		}
+	}
+
+	// Initialize GitHub Copilot provider with retry (OAuth)
+	authInfo, err := auth.Get("github-copilot")
+	if err == nil && authInfo != nil {
+		if oauthAuth, ok := authInfo.(auth.OAuth); ok && oauthAuth.Access != "" {
+			copilot := provider.NewGitHubCopilot(oauthAuth.Access)
+			copilot.SetModelsDevRegistry(s.modelsDevRegistry)
+			wrapped := provider.NewRetryableProvider(copilot, retryConfig)
+			if err := registerProvider(wrapped); err != nil {
+				return fmt.Errorf("failed to register github-copilot: %w", err)
+			}
+		}
+	}
+
+	// Initialize OpenRouter provider with retry
+	if apiKey := getAPIKey("openrouter", "OPENROUTER_API_KEY"); apiKey != "" {
+		openrouter := provider.NewOpenRouter(apiKey)
+		openrouter.SetModelsDevRegistry(s.modelsDevRegistry)
+		wrapped := provider.NewRetryableProvider(openrouter, retryConfig)
+		if err := registerProvider(wrapped); err != nil {
+			return fmt.Errorf("failed to register openrouter: %w", err)
 		}
 	}
 
@@ -172,6 +210,7 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	// Configuration
 	r.Get("/config", s.handleConfigGet)
 	r.Post("/config", s.handleConfigUpdate)
+	r.Get("/config/providers", s.handleProvidersGet)
 
 	// File operations
 	r.Get("/file/status", s.handleFilesStatus)
@@ -677,6 +716,90 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleProvidersGet(w http.ResponseWriter, r *http.Request) {
+	// Get all available models from the provider registry
+	allModels := s.providerRegistry.ListModels()
+
+	// Convert to response format expected by SDK
+	var providers []map[string]interface{}
+
+	for providerName, models := range allModels {
+		// Get provider info from modelsdev if available
+		providerInfo, hasProviderInfo := s.modelsDevRegistry.GetProvider(providerName)
+
+		// Convert models slice to map[string]Model
+		modelsMap := make(map[string]interface{})
+		for _, modelID := range models {
+			// Try to get rich model data from modelsdev
+			modelData, hasModelData := s.modelsDevRegistry.GetModel(providerName, modelID)
+
+			if hasModelData {
+				// Use rich model data from modelsdev
+				modelsMap[modelID] = map[string]interface{}{
+					"id":         modelData.ID,
+					"name":       modelData.Name,
+					"attachment": modelData.Attachment,
+					"cost": map[string]interface{}{
+						"input":       modelData.Cost.Input,
+						"output":      modelData.Cost.Output,
+						"cache_read":  modelData.Cost.CacheRead,
+						"cache_write": modelData.Cost.CacheWrite,
+					},
+					"limit": map[string]interface{}{
+						"context": modelData.Limit.Context,
+						"output":  modelData.Limit.Output,
+					},
+					"options":      modelData.Options,
+					"reasoning":    modelData.Reasoning,
+					"release_date": modelData.ReleaseDate,
+					"temperature":  modelData.Temperature,
+					"tool_call":    modelData.ToolCall,
+				}
+			} else {
+				// Fallback to stub data
+				modelsMap[modelID] = map[string]interface{}{
+					"id":           modelID,
+					"name":         modelID,
+					"attachment":   false,
+					"cost":         map[string]interface{}{},
+					"limit":        map[string]interface{}{},
+					"options":      map[string]interface{}{},
+					"reasoning":    false,
+					"release_date": "",
+					"temperature":  true,
+					"tool_call":    true,
+				}
+			}
+		}
+
+		providerEntry := map[string]interface{}{
+			"id":     providerName,
+			"name":   providerName,
+			"models": modelsMap,
+			"env":    []string{},
+		}
+
+		// Add provider info from modelsdev if available
+		if hasProviderInfo {
+			providerEntry["name"] = providerInfo.Name
+			providerEntry["env"] = providerInfo.Env
+		}
+
+		providers = append(providers, providerEntry)
+	}
+
+	response := map[string]interface{}{
+		"providers": providers,
+		"default": map[string]string{
+			"provider": "anthropic",
+			"model":    "claude-3-5-sonnet-20241022",
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // File operation handlers

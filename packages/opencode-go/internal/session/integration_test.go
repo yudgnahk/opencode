@@ -355,6 +355,10 @@ func (m *mockProvider) Stream(ctx context.Context, req provider.CompletionReques
 	return m.streamResp, nil
 }
 
+func (m *mockProvider) SetModelsDevRegistry(registry provider.ModelsDevRegistry) {
+	// Mock provider doesn't need modelsdev registry
+}
+
 type mockStream struct {
 	chunks []provider.StreamChunk
 	index  int
@@ -403,6 +407,10 @@ func (c *countingProvider) Complete(ctx context.Context, req provider.Completion
 
 func (c *countingProvider) Stream(ctx context.Context, req provider.CompletionRequest) (provider.Stream, error) {
 	return nil, os.ErrNotExist
+}
+
+func (c *countingProvider) SetModelsDevRegistry(registry provider.ModelsDevRegistry) {
+	// Counting provider doesn't need modelsdev registry
 }
 
 type apiError struct {

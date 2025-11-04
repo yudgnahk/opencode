@@ -7,6 +7,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BIN_PATH="$PROJECT_ROOT/bin/opencode"
 
+# Parse arguments
+USE_RANDOM_PORT=false
+PORT=8080
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --random-port)
+            USE_RANDOM_PORT=true
+            shift
+            ;;
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 # Check if binary exists
 if [ ! -f "$BIN_PATH" ]; then
     echo "Error: opencode binary not found at $BIN_PATH"
@@ -14,9 +33,16 @@ if [ ! -f "$BIN_PATH" ]; then
     exit 1
 fi
 
+# Find a random available port if requested
+if [ "$USE_RANDOM_PORT" = true ]; then
+    # Use Python to find a random available port
+    PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
+    echo "Using random port: $PORT"
+fi
+
 # Start server in background
-echo "Starting OpenCode server..."
-"$BIN_PATH" serve > /tmp/opencode-server.log 2>&1 &
+echo "Starting OpenCode server on port $PORT..."
+"$BIN_PATH" serve --port "$PORT" > /tmp/opencode-server.log 2>&1 &
 SERVER_PID=$!
 
 # Function to cleanup on exit
@@ -32,8 +58,8 @@ trap cleanup EXIT INT TERM
 # Wait for server to be ready
 echo "Waiting for server to start..."
 for i in {1..30}; do
-    if curl -s http://localhost:8080/health > /dev/null 2>&1; then
-        echo "Server is ready!"
+    if curl -s "http://localhost:$PORT/health" > /dev/null 2>&1; then
+        echo "Server is ready on http://localhost:$PORT!"
         break
     fi
     if [ $i -eq 30 ]; then
@@ -46,5 +72,5 @@ done
 
 # Start TUI
 echo "Starting OpenCode TUI..."
-export OPENCODE_SERVER=http://localhost:8080
+export OPENCODE_SERVER="http://localhost:$PORT"
 "$BIN_PATH" tui "$@"

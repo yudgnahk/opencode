@@ -10,8 +10,9 @@ import (
 )
 
 type GeminiProvider struct {
-	client *genai.Client
-	apiKey string
+	client            *genai.Client
+	apiKey            string
+	modelsDevRegistry ModelsDevRegistry
 }
 
 func NewGemini(ctx context.Context, apiKey string) (*GeminiProvider, error) {
@@ -31,6 +32,15 @@ func (p *GeminiProvider) Name() string {
 }
 
 func (p *GeminiProvider) Models() []string {
+	// Try to get models from models.dev registry first
+	if p.modelsDevRegistry != nil {
+		models := p.modelsDevRegistry.GetModels("gemini")
+		if len(models) > 0 {
+			return models
+		}
+	}
+
+	// Fallback to hardcoded list
 	return []string{
 		"gemini-2.0-flash-exp",
 		"gemini-exp-1206",
@@ -41,6 +51,10 @@ func (p *GeminiProvider) Models() []string {
 		"gemini-1.5-flash-002",
 		"gemini-1.5-flash-8b",
 	}
+}
+
+func (p *GeminiProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	p.modelsDevRegistry = registry
 }
 
 func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {

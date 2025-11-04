@@ -47,6 +47,10 @@ func (m *mockSummarizeProvider) Stream(ctx context.Context, req provider.Complet
 	return nil, errors.New("streaming not implemented")
 }
 
+func (m *mockSummarizeProvider) SetModelsDevRegistry(registry provider.ModelsDevRegistry) {
+	// Mock provider doesn't need modelsdev registry
+}
+
 func TestManager_Summarize_Success(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()

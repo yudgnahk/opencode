@@ -66,8 +66,8 @@ test:
 # Note: Open two terminals - one for 'make serve', one for 'make tui'
 # Or use the run script: ./bin/run-opencode.sh
 run: build-all
-	@echo "Starting opencode server and TUI..."
-	@./script/run-opencode.sh
+	@echo "Starting opencode server and TUI with random port..."
+	@./script/run-opencode.sh --random-port
 
 # Run server only
 serve: build

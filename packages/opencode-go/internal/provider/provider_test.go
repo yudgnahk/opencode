@@ -38,6 +38,10 @@ func (m *MockProvider) Stream(ctx context.Context, req CompletionRequest) (Strea
 	return m.streamResp, nil
 }
 
+func (m *MockProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	// Mock provider doesn't need modelsdev registry
+}
+
 // CountingProvider for testing retries
 type CountingProvider struct {
 	name         string
@@ -58,6 +62,10 @@ func (c *CountingProvider) Complete(ctx context.Context, req CompletionRequest) 
 
 func (c *CountingProvider) Stream(ctx context.Context, req CompletionRequest) (Stream, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (c *CountingProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	// Counting provider doesn't need modelsdev registry
 }
 
 // MockStream for testing

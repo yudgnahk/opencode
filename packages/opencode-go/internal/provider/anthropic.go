@@ -10,8 +10,9 @@ import (
 )
 
 type AnthropicProvider struct {
-	client anthropic.Client
-	apiKey string
+	client            anthropic.Client
+	apiKey            string
+	modelsDevRegistry ModelsDevRegistry
 }
 
 func NewAnthropic(apiKey string) *AnthropicProvider {
@@ -30,6 +31,15 @@ func (p *AnthropicProvider) Name() string {
 }
 
 func (p *AnthropicProvider) Models() []string {
+	// Try to get models from models.dev registry first
+	if p.modelsDevRegistry != nil {
+		models := p.modelsDevRegistry.GetModels("anthropic")
+		if len(models) > 0 {
+			return models
+		}
+	}
+
+	// Fallback to hardcoded list
 	return []string{
 		"claude-3-5-sonnet-20241022",
 		"claude-3-5-sonnet-20240620",
@@ -37,6 +47,10 @@ func (p *AnthropicProvider) Models() []string {
 		"claude-3-sonnet-20240229",
 		"claude-3-haiku-20240307",
 	}
+}
+
+func (p *AnthropicProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	p.modelsDevRegistry = registry
 }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {

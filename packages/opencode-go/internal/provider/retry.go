@@ -47,6 +47,10 @@ func (p *RetryableProvider) Models() []string {
 	return p.provider.Models()
 }
 
+func (p *RetryableProvider) SetModelsDevRegistry(registry ModelsDevRegistry) {
+	p.provider.SetModelsDevRegistry(registry)
+}
+
 func (p *RetryableProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	var lastErr error
 	backoff := p.config.InitialBackoff

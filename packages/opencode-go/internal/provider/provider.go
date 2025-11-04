@@ -4,6 +4,11 @@ import (
 	"context"
 )
 
+// ModelsDevRegistry interface for accessing models.dev data
+type ModelsDevRegistry interface {
+	GetModels(providerID string) []string
+}
+
 // Provider is the interface all AI providers must implement
 type Provider interface {
 	// Complete generates a non-streaming completion
@@ -17,6 +22,9 @@ type Provider interface {
 
 	// Models returns available models
 	Models() []string
+
+	// SetModelsDevRegistry sets the models.dev registry for dynamic model lookup
+	SetModelsDevRegistry(registry ModelsDevRegistry)
 }
 
 // CompletionRequest is the unified request format
