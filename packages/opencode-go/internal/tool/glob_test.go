@@ -8,7 +8,7 @@ import (
 
 func TestGlob(t *testing.T) {
 	tmpDir := t.TempDir()
-	executor := NewToolExecutor(tmpDir)
+	executor := newTestToolExecutor(tmpDir)
 
 	// Create test files
 	files := []string{

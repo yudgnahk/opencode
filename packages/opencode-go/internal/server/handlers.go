@@ -21,6 +21,7 @@ import (
 type Server struct {
 	storage           *storage.Storage
 	tools             *tool.ToolExecutor
+	taskExecutor      *tool.TaskExecutor
 	project           *project.Project
 	sessionManager    *session.Manager
 	providerRegistry  *provider.Registry
@@ -41,9 +42,16 @@ func New(storage *storage.Storage, workingDir string) *Server {
 	// Create completion service
 	completionSvc := session.NewCompletionService(sessionMgr, registry)
 
+	// Determine project ID
+	projectID := "default"
+	if proj != nil {
+		projectID = proj.Name
+	}
+
 	return &Server{
 		storage:           storage,
-		tools:             tool.NewToolExecutor(workingDir),
+		tools:             tool.NewToolExecutor(workingDir, storage, registry, projectID),
+		taskExecutor:      tool.NewTaskExecutor(storage, registry, projectID),
 		project:           proj,
 		sessionManager:    sessionMgr,
 		providerRegistry:  registry,
@@ -128,6 +136,8 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	r.Get("/session/{id}", s.handleSessionsGet)
 	r.Delete("/session/{id}", s.handleSessionsDelete)
 	r.Post("/session/{id}/fork", s.handleSessionsFork)
+	r.Post("/session/{id}/branch", s.handleSessionsBranch)
+	r.Post("/session/{id}/revert", s.handleSessionsRevert)
 	r.Post("/session/{id}/summarize", s.handleSessionsSummarize)
 
 	// Todos
@@ -135,6 +145,9 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	r.Put("/session/{id}/todos", s.handleTodosUpdate)
 	r.Post("/session/{id}/todos", s.handleTodosAdd)
 	r.Patch("/session/{id}/todos/{todoId}", s.handleTodosUpdateStatus)
+
+	// Tasks
+	r.Post("/session/{id}/task", s.handleTaskExecute)
 
 	// Messages
 	r.Get("/session/{id}/messages", s.handleMessagesGet)
@@ -346,6 +359,49 @@ func (s *Server) handleSessionsFork(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(forked)
 }
 
+func (s *Server) handleSessionsBranch(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		FromMessageID string `json:"fromMessageId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	branched, err := s.sessionManager.Branch(r.Context(), sessionID, req.FromMessageID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(branched)
+}
+
+func (s *Server) handleSessionsRevert(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		ToMessageID string `json:"toMessageId"`
+		Inclusive   bool   `json:"inclusive"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err := s.sessionManager.Revert(r.Context(), sessionID, req.ToMessageID, req.Inclusive)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleSessionsSummarize(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 
@@ -439,6 +495,24 @@ func (s *Server) handleTodosUpdateStatus(w http.ResponseWriter, r *http.Request)
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// Task handlers
+func (s *Server) handleTaskExecute(w http.ResponseWriter, r *http.Request) {
+	var req tool.TaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.taskExecutor.Execute(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // Message handlers

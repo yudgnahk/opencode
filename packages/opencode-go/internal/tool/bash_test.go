@@ -7,7 +7,7 @@ import (
 
 func TestBash(t *testing.T) {
 	tmpDir := t.TempDir()
-	executor := NewToolExecutor(tmpDir)
+	executor := newTestToolExecutor(tmpDir)
 
 	tests := []struct {
 		name    string

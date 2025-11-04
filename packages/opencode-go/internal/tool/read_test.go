@@ -17,7 +17,7 @@ func TestRead(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	executor := NewToolExecutor(tmpDir)
+	executor := newTestToolExecutor(tmpDir)
 
 	tests := []struct {
 		name    string
@@ -116,7 +116,7 @@ func TestReadLongLines(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	executor := NewToolExecutor(tmpDir)
+	executor := newTestToolExecutor(tmpDir)
 	resp, err := executor.Read(ReadRequest{FilePath: testFile})
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)

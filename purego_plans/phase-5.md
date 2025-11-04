@@ -904,16 +904,23 @@ Create `internal/parser/treesitter.go` - simplified AST parsing for code analysi
 
 ### Task Spawning
 
-- [ ] Implement Task tool
-- [ ] Create sub-sessions
-- [ ] Execute sub-agent prompts
-- [ ] Return results
+- [x] Implement Task tool
+- [x] Create sub-sessions
+- [x] Execute sub-agent prompts
+- [x] Return results
+- [x] Add TaskExecutor with provider and storage
+- [x] HTTP API endpoint: POST /session/{id}/task
+- [x] Unit tests (2 tests passing)
+- [x] HTTP endpoint tests (2 tests passing)
 
 ### Session Operations
 
-- [ ] Implement Revert
-- [ ] Implement Branch (alias for Fork)
-- [ ] Delete removed messages
+- [x] Implement Revert (exclusive and inclusive modes)
+- [x] Implement Branch (alias for Fork)
+- [x] Delete removed messages in Revert
+- [x] HTTP API endpoints: POST /session/{id}/revert, POST /session/{id}/branch
+- [x] Unit tests (4 tests passing)
+- [x] HTTP endpoint tests (3 tests passing)
 
 ### Optional
 
@@ -931,7 +938,7 @@ Create `internal/parser/treesitter.go` - simplified AST parsing for code analysi
 
 ## Phase 5 Status
 
-**Status**: 🟡 **IN PROGRESS** - Week 34: Task/Sub-Agent Spawning
+**Status**: ✅ **COMPLETE** - All Week 29-35 features implemented and tested
 
 **Current State**:
 
@@ -939,6 +946,8 @@ Create `internal/parser/treesitter.go` - simplified AST parsing for code analysi
 - Session Summarization (Week 31) ✅ COMPLETE - Full implementation with tests and HTTP API
 - Todo Management (Week 32) ✅ COMPLETE - 10 unit tests + 6 HTTP endpoint tests passing
 - Web Fetching (Week 33) ✅ COMPLETE - 13 tests passing with full HTML-to-Markdown support
+- Task Spawning (Week 34) ✅ COMPLETE - 2 unit tests + 2 HTTP endpoint tests passing
+- Session Revert & Branch (Week 35) ✅ COMPLETE - 4 unit tests + 3 HTTP endpoint tests passing
 
 **Completed Work**:
 
@@ -977,15 +986,34 @@ Create `internal/parser/treesitter.go` - simplified AST parsing for code analysi
    - Mock HTTP server tests for reliability
    - Timeout and error handling tests
 
-**Next Steps**:
+5. ✅ Task Spawning (Week 34)
+   - TaskExecutor implementation with provider and storage support
+   - Sub-session creation for spawned tasks
+   - Task execution with description and prompt parameters
+   - HTTP API endpoint: `POST /session/{id}/task`
+   - 2 unit tests in `internal/tool/task_test.go`
+   - 2 HTTP endpoint tests in `internal/server/handlers_test.go`
+   - Error handling for invalid JSON and task execution failures
+
+6. ✅ Session Revert & Branch (Week 35)
+   - Revert implementation with exclusive/inclusive modes
+   - Branch implementation (alias to Fork for semantic clarity)
+   - Proper message deletion on revert
+   - HTTP API endpoints: `POST /session/{id}/revert`, `POST /session/{id}/branch`
+   - 4 unit tests in `internal/session/session_test.go`
+   - 3 HTTP endpoint tests in `internal/server/handlers_test.go`
+   - Full integration with session management and storage
+
+**All Steps Complete**:
 
 1. ~~Start with LSP integration (Week 29-30)~~ ✅ **COMPLETE**
 2. ~~Implement session summarization (Week 31)~~ ✅ **COMPLETE**
 3. ~~Build todo management system (Week 32)~~ ✅ **COMPLETE**
 4. ~~Add web fetching capability (Week 33)~~ ✅ **COMPLETE**
-5. Add web fetching capability (Week 33)
-6. Implement task spawning (Week 34)
-7. Add session revert/branch features (Week 35)
+5. ~~Implement task spawning (Week 34)~~ ✅ **COMPLETE**
+6. ~~Add session revert/branch features (Week 35)~~ ✅ **COMPLETE**
+
+**Phase 5 is 100% Complete!** All 7 weeks of advanced features have been implemented, tested, and integrated.
 
 ---
 

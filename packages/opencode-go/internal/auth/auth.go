@@ -65,6 +65,17 @@ func getAuthFilePath() string {
 	return authFilePathFunc()
 }
 
+// SetAuthFilePathForTest overrides the auth file path for testing
+// Returns the previous auth file path function's result for restoration
+func SetAuthFilePathForTest(testPath string) string {
+	mu.Lock()
+	defer mu.Unlock()
+
+	previous := authFilePathFunc()
+	authFilePathFunc = func() string { return testPath }
+	return previous
+}
+
 // Get retrieves authentication info for a specific provider
 // Returns nil if provider not found or file doesn't exist
 func Get(providerID string) (Info, error) {

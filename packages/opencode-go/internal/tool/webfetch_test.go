@@ -10,7 +10,7 @@ import (
 )
 
 func TestWebFetch(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	tests := []struct {
 		name       string
@@ -190,7 +190,7 @@ func TestWebFetch(t *testing.T) {
 }
 
 func TestWebFetchHTTPUpgrade(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Create HTTPS test server
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +221,7 @@ func TestWebFetchHTTPUpgrade(t *testing.T) {
 }
 
 func TestWebFetchTimeout(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Create server that delays response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +246,7 @@ func TestWebFetchTimeout(t *testing.T) {
 }
 
 func TestWebFetchMaxTimeout(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "OK")

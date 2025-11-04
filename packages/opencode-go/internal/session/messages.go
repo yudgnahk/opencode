@@ -148,3 +148,72 @@ func (m *Manager) DeleteMessage(ctx context.Context, messageID string) error {
 
 	return nil
 }
+
+// Revert removes all messages after a given message ID (inclusive or exclusive based on inclusive flag)
+func (m *Manager) Revert(ctx context.Context, sessionID string, messageID string, inclusive bool) error {
+	// Lock to prevent race conditions when modifying session
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Get session from cache
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		// Load from storage
+		var loaded Session
+		if err := m.storage.GetJSON("sessions", sessionID, &loaded); err != nil {
+			return err
+		}
+		if loaded.ID == "" {
+			return fmt.Errorf("session not found: %s", sessionID)
+		}
+		session = &loaded
+		m.sessions[sessionID] = session
+	}
+
+	// Find the message index
+	messageIndex := -1
+	for i, id := range session.MessageIDs {
+		if id == messageID {
+			messageIndex = i
+			break
+		}
+	}
+
+	if messageIndex == -1 {
+		return fmt.Errorf("message not found: %s", messageID)
+	}
+
+	// Determine cutoff index
+	cutoffIndex := messageIndex
+	if !inclusive {
+		cutoffIndex = messageIndex + 1
+	}
+
+	// Get messages to delete
+	messagesToDelete := session.MessageIDs[cutoffIndex:]
+
+	// Delete messages from storage
+	for _, id := range messagesToDelete {
+		if err := m.storage.Delete("messages", id); err != nil {
+			// Continue even if delete fails
+			continue
+		}
+	}
+
+	// Update session with remaining messages
+	session.MessageIDs = session.MessageIDs[:cutoffIndex]
+	session.UpdatedAt = time.Now()
+
+	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+		return err
+	}
+
+	// Emit event
+	m.eventBus.Publish(Event{
+		Type:      EventSessionUpdated,
+		SessionID: sessionID,
+		Data:      session,
+	})
+
+	return nil
+}

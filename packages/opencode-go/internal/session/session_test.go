@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -403,5 +404,186 @@ func TestManager_GetHistory(t *testing.T) {
 
 	if history.Offset != 0 {
 		t.Errorf("expected offset 0, got %d", history.Offset)
+	}
+}
+
+func TestManager_Revert(t *testing.T) {
+	store := setupTestStorage(t)
+	defer store.Close()
+
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
+	ctx := context.Background()
+
+	// Create a session with messages
+	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Add 5 messages
+	messages := make([]*Message, 5)
+	for i := 0; i < 5; i++ {
+		content := []ContentBlock{{Type: "text", Text: fmt.Sprintf("Message %d", i+1)}}
+		role := RoleUser
+		if i%2 == 1 {
+			role = RoleAssistant
+		}
+		msg, err := manager.AddMessage(ctx, session.ID, role, content)
+		if err != nil {
+			t.Fatalf("failed to add message %d: %v", i+1, err)
+		}
+		messages[i] = msg
+	}
+
+	t.Run("revert exclusive (keep message at index)", func(t *testing.T) {
+		// Revert to message 2 (index 2), exclusive - keeps messages 0, 1, 2
+		err := manager.Revert(ctx, session.ID, messages[2].ID, false)
+		if err != nil {
+			t.Fatalf("failed to revert: %v", err)
+		}
+
+		// Verify session has only 3 messages
+		sess, err := manager.Get(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+
+		if len(sess.MessageIDs) != 3 {
+			t.Errorf("expected 3 messages after revert, got %d", len(sess.MessageIDs))
+		}
+
+		// Verify we kept the right messages
+		if sess.MessageIDs[0] != messages[0].ID {
+			t.Error("expected message 0 to remain")
+		}
+		if sess.MessageIDs[1] != messages[1].ID {
+			t.Error("expected message 1 to remain")
+		}
+		if sess.MessageIDs[2] != messages[2].ID {
+			t.Error("expected message 2 to remain")
+		}
+	})
+}
+
+func TestManager_RevertInclusive(t *testing.T) {
+	store := setupTestStorage(t)
+	defer store.Close()
+
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
+	ctx := context.Background()
+
+	// Create a session with messages
+	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Add 5 messages
+	messages := make([]*Message, 5)
+	for i := 0; i < 5; i++ {
+		content := []ContentBlock{{Type: "text", Text: fmt.Sprintf("Message %d", i+1)}}
+		role := RoleUser
+		if i%2 == 1 {
+			role = RoleAssistant
+		}
+		msg, err := manager.AddMessage(ctx, session.ID, role, content)
+		if err != nil {
+			t.Fatalf("failed to add message %d: %v", i+1, err)
+		}
+		messages[i] = msg
+	}
+
+	// Revert to message 2 (index 2), inclusive - keeps only messages 0, 1
+	err = manager.Revert(ctx, session.ID, messages[2].ID, true)
+	if err != nil {
+		t.Fatalf("failed to revert: %v", err)
+	}
+
+	// Verify session has only 2 messages
+	sess, err := manager.Get(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+
+	if len(sess.MessageIDs) != 2 {
+		t.Errorf("expected 2 messages after inclusive revert, got %d", len(sess.MessageIDs))
+	}
+
+	// Verify we kept the right messages
+	if sess.MessageIDs[0] != messages[0].ID {
+		t.Error("expected message 0 to remain")
+	}
+	if sess.MessageIDs[1] != messages[1].ID {
+		t.Error("expected message 1 to remain")
+	}
+}
+
+func TestManager_RevertNotFound(t *testing.T) {
+	store := setupTestStorage(t)
+	defer store.Close()
+
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
+	ctx := context.Background()
+
+	// Create a session
+	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Try to revert to non-existent message
+	err = manager.Revert(ctx, session.ID, "nonexistent-message-id", false)
+	if err == nil {
+		t.Error("expected error when reverting to non-existent message")
+	}
+}
+
+func TestManager_Branch(t *testing.T) {
+	store := setupTestStorage(t)
+	defer store.Close()
+
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
+	ctx := context.Background()
+
+	// Create a session with messages
+	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Add messages
+	content1 := []ContentBlock{{Type: "text", Text: "Message 1"}}
+	msg1, err := manager.AddMessage(ctx, session.ID, RoleUser, content1)
+	if err != nil {
+		t.Fatalf("failed to add message 1: %v", err)
+	}
+
+	content2 := []ContentBlock{{Type: "text", Text: "Message 2"}}
+	_, err = manager.AddMessage(ctx, session.ID, RoleAssistant, content2)
+	if err != nil {
+		t.Fatalf("failed to add message 2: %v", err)
+	}
+
+	// Branch at message 1
+	branched, err := manager.Branch(ctx, session.ID, msg1.ID)
+	if err != nil {
+		t.Fatalf("failed to branch session: %v", err)
+	}
+
+	// Verify branch has same behavior as Fork
+	if branched.ID == session.ID {
+		t.Error("branched session should have different ID")
+	}
+
+	if branched.ParentID != session.ID {
+		t.Errorf("expected ParentID %s, got %s", session.ID, branched.ParentID)
+	}
+
+	if len(branched.MessageIDs) != 1 {
+		t.Errorf("expected branched session to have 1 message, got %d", len(branched.MessageIDs))
 	}
 }

@@ -236,6 +236,11 @@ func (m *Manager) Fork(ctx context.Context, id string, fromMessageID string) (*S
 	return forked, nil
 }
 
+// Branch is an alias for Fork to match TypeScript backend API
+func (m *Manager) Branch(ctx context.Context, id string, fromMessageID string) (*Session, error) {
+	return m.Fork(ctx, id, fromMessageID)
+}
+
 func generateID() string {
 	b := make([]byte, 16)
 	rand.Read(b)

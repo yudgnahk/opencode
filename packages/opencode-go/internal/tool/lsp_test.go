@@ -5,7 +5,7 @@ import (
 )
 
 func TestLSPHover(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Test with missing filePath
 	_, err := executor.LSPHover(LSPHoverRequest{
@@ -28,7 +28,7 @@ func TestLSPHover(t *testing.T) {
 }
 
 func TestLSPCompletion(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Test with missing filePath
 	_, err := executor.LSPCompletion(LSPCompletionRequest{
@@ -51,7 +51,7 @@ func TestLSPCompletion(t *testing.T) {
 }
 
 func TestLSPDefinition(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Test with missing filePath
 	_, err := executor.LSPDefinition(LSPDefinitionRequest{
@@ -74,7 +74,7 @@ func TestLSPDefinition(t *testing.T) {
 }
 
 func TestLSPReferences(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Test with missing filePath
 	_, err := executor.LSPReferences(LSPReferencesRequest{
@@ -97,7 +97,7 @@ func TestLSPReferences(t *testing.T) {
 }
 
 func TestStopLSPServers(t *testing.T) {
-	executor := NewToolExecutor("/tmp")
+	executor := newTestToolExecutor("/tmp")
 
 	// Should not panic
 	executor.StopLSPServers()
