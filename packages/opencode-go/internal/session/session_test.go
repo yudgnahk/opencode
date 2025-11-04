@@ -32,7 +32,7 @@ func TestManager_Create(t *testing.T) {
 	manager := NewManager(store, registry)
 	ctx := context.Background()
 
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -45,16 +45,12 @@ func TestManager_Create(t *testing.T) {
 		t.Errorf("expected ProjectID 'test-project', got %s", session.ProjectID)
 	}
 
-	if session.Provider != "anthropic" {
-		t.Errorf("expected Provider 'anthropic', got %s", session.Provider)
+	if session.Directory != "/test/dir" {
+		t.Errorf("expected Directory '/test/dir', got %s", session.Directory)
 	}
 
-	if session.Model != "claude-3-opus" {
-		t.Errorf("expected Model 'claude-3-opus', got %s", session.Model)
-	}
-
-	if session.State != StateIdle {
-		t.Errorf("expected State 'idle', got %s", session.State)
+	if session.Version != "1.0.0" {
+		t.Errorf("expected Version '1.0.0', got %s", session.Version)
 	}
 }
 
@@ -67,7 +63,7 @@ func TestManager_Get(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	created, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	created, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -96,17 +92,17 @@ func TestManager_List(t *testing.T) {
 	ctx := context.Background()
 
 	// Create multiple sessions
-	_, err := manager.Create(ctx, "project-1", "anthropic", "claude-3-opus")
+	_, err := manager.Create(ctx, "project-1", "/test/dir1", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session 1: %v", err)
 	}
 
-	_, err = manager.Create(ctx, "project-1", "openai", "gpt-4")
+	_, err = manager.Create(ctx, "project-1", "/test/dir2", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session 2: %v", err)
 	}
 
-	_, err = manager.Create(ctx, "project-2", "anthropic", "claude-3-opus")
+	_, err = manager.Create(ctx, "project-2", "/test/dir3", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session 3: %v", err)
 	}
@@ -141,7 +137,7 @@ func TestManager_Update(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -166,10 +162,6 @@ func TestManager_Update(t *testing.T) {
 	if updated.Title != "Updated Title" {
 		t.Errorf("expected Title 'Updated Title', got %s", updated.Title)
 	}
-
-	if updated.State != StateProcessing {
-		t.Errorf("expected State 'processing', got %s", updated.State)
-	}
 }
 
 func TestManager_Delete(t *testing.T) {
@@ -181,7 +173,7 @@ func TestManager_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -208,7 +200,7 @@ func TestManager_AddMessage(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -249,7 +241,7 @@ func TestManager_GetMessages(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -295,7 +287,7 @@ func TestManager_Fork(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session with messages
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -327,8 +319,13 @@ func TestManager_Fork(t *testing.T) {
 		t.Errorf("expected ParentID %s, got %s", session.ID, forked.ParentID)
 	}
 
-	if len(forked.MessageIDs) != 1 {
-		t.Errorf("expected forked session to have 1 message, got %d", len(forked.MessageIDs))
+	// Verify forked session has correct number of messages
+	forkedMessages, err := manager.GetMessages(ctx, forked.ID)
+	if err != nil {
+		t.Fatalf("failed to get forked messages: %v", err)
+	}
+	if len(forkedMessages) != 1 {
+		t.Errorf("expected forked session to have 1 message, got %d", len(forkedMessages))
 	}
 }
 
@@ -370,7 +367,7 @@ func TestManager_GetHistory(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session with messages
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -416,7 +413,7 @@ func TestManager_Revert(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session with messages
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -444,23 +441,23 @@ func TestManager_Revert(t *testing.T) {
 		}
 
 		// Verify session has only 3 messages
-		sess, err := manager.Get(ctx, session.ID)
+		sessionMessages, err := manager.GetMessages(ctx, session.ID)
 		if err != nil {
-			t.Fatalf("failed to get session: %v", err)
+			t.Fatalf("failed to get messages: %v", err)
 		}
 
-		if len(sess.MessageIDs) != 3 {
-			t.Errorf("expected 3 messages after revert, got %d", len(sess.MessageIDs))
+		if len(sessionMessages) != 3 {
+			t.Errorf("expected 3 messages after revert, got %d", len(sessionMessages))
 		}
 
 		// Verify we kept the right messages
-		if sess.MessageIDs[0] != messages[0].ID {
+		if sessionMessages[0].ID != messages[0].ID {
 			t.Error("expected message 0 to remain")
 		}
-		if sess.MessageIDs[1] != messages[1].ID {
+		if sessionMessages[1].ID != messages[1].ID {
 			t.Error("expected message 1 to remain")
 		}
-		if sess.MessageIDs[2] != messages[2].ID {
+		if sessionMessages[2].ID != messages[2].ID {
 			t.Error("expected message 2 to remain")
 		}
 	})
@@ -475,7 +472,7 @@ func TestManager_RevertInclusive(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session with messages
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -502,20 +499,20 @@ func TestManager_RevertInclusive(t *testing.T) {
 	}
 
 	// Verify session has only 2 messages
-	sess, err := manager.Get(ctx, session.ID)
+	sessionMessages, err := manager.GetMessages(ctx, session.ID)
 	if err != nil {
-		t.Fatalf("failed to get session: %v", err)
+		t.Fatalf("failed to get messages: %v", err)
 	}
 
-	if len(sess.MessageIDs) != 2 {
-		t.Errorf("expected 2 messages after inclusive revert, got %d", len(sess.MessageIDs))
+	if len(sessionMessages) != 2 {
+		t.Errorf("expected 2 messages after inclusive revert, got %d", len(sessionMessages))
 	}
 
 	// Verify we kept the right messages
-	if sess.MessageIDs[0] != messages[0].ID {
+	if sessionMessages[0].ID != messages[0].ID {
 		t.Error("expected message 0 to remain")
 	}
-	if sess.MessageIDs[1] != messages[1].ID {
+	if sessionMessages[1].ID != messages[1].ID {
 		t.Error("expected message 1 to remain")
 	}
 }
@@ -529,7 +526,7 @@ func TestManager_RevertNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -550,7 +547,7 @@ func TestManager_Branch(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a session with messages
-	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
+	session, err := manager.Create(ctx, "test-project", "/test/dir", "1.0.0")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -583,7 +580,12 @@ func TestManager_Branch(t *testing.T) {
 		t.Errorf("expected ParentID %s, got %s", session.ID, branched.ParentID)
 	}
 
-	if len(branched.MessageIDs) != 1 {
-		t.Errorf("expected branched session to have 1 message, got %d", len(branched.MessageIDs))
+	// Verify branched session has correct number of messages
+	branchedMessages, err := manager.GetMessages(ctx, branched.ID)
+	if err != nil {
+		t.Fatalf("failed to get branched messages: %v", err)
+	}
+	if len(branchedMessages) != 1 {
+		t.Errorf("expected branched session to have 1 message, got %d", len(branchedMessages))
 	}
 }

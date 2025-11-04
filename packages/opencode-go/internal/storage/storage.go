@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/opencode/opencode-go/internal/config"
 )
 
 type Storage struct {
 	dir string
+	mu  sync.RWMutex
 }
 
 // New creates a new storage instance
@@ -82,11 +84,47 @@ func (s *Storage) ReadJSON(key []string, v interface{}) error {
 
 // WriteJSON marshals and writes a JSON file
 func (s *Storage) WriteJSON(key []string, v interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	return s.Write(key, data)
+}
+
+// ReadJSONPartial reads only the specified fields from a JSON file
+// This is much faster than reading the entire file when you only need a few fields
+func (s *Storage) ReadJSONPartial(key []string, fields []string) (map[string]interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := s.Read(key)
+	if err != nil || data == nil {
+		return nil, err
+	}
+
+	// Unmarshal into a generic map
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+
+	// If no specific fields requested, return all
+	if len(fields) == 0 {
+		return result, nil
+	}
+
+	// Filter to only requested fields
+	filtered := make(map[string]interface{})
+	for _, field := range fields {
+		if val, ok := result[field]; ok {
+			filtered[field] = val
+		}
+	}
+
+	return filtered, nil
 }
 
 // List returns all items under a prefix path
@@ -120,6 +158,59 @@ func (s *Storage) List(prefix []string) ([][]string, error) {
 			// Build full key path
 			fullKey := append(prefix, parts...)
 			results = append(results, fullKey)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// ListInfo returns file paths and their modification times without reading content
+// This is much faster than List() when you only need metadata
+type FileInfo struct {
+	Key     []string
+	ModTime int64 // Unix timestamp in milliseconds
+	Size    int64
+}
+
+func (s *Storage) ListInfo(prefix []string) ([]FileInfo, error) {
+	basePath := filepath.Join(s.dir, filepath.Join(prefix...))
+
+	// Check if directory exists
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return []FileInfo{}, nil
+	}
+
+	var results []FileInfo
+	err := filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".json") {
+			// Get relative path from basePath
+			relPath, err := filepath.Rel(basePath, path)
+			if err != nil {
+				return err
+			}
+
+			// Remove .json extension
+			relPath = strings.TrimSuffix(relPath, ".json")
+
+			// Split into parts
+			parts := strings.Split(filepath.ToSlash(relPath), "/")
+
+			// Build full key path
+			fullKey := append(prefix, parts...)
+
+			results = append(results, FileInfo{
+				Key:     fullKey,
+				ModTime: info.ModTime().UnixMilli(),
+				Size:    info.Size(),
+			})
 		}
 		return nil
 	})

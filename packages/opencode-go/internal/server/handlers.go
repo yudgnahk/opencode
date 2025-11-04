@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/opencode/opencode-go/internal/agent"
 	"github.com/opencode/opencode-go/internal/auth"
 	"github.com/opencode/opencode-go/internal/config"
 	"github.com/opencode/opencode-go/internal/modelsdev"
@@ -319,20 +320,36 @@ func (s *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 // Session handlers
 func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("projectId")
+	light := r.URL.Query().Get("light") == "true" // Use lightweight response
 
 	// Default to current project if not specified (matches TypeScript behavior)
 	if projectID == "" && s.project != nil {
 		projectID = s.project.ID
 	}
 
-	sessions, err := s.sessionManager.List(r.Context(), projectID)
+	w.Header().Set("Content-Type", "application/json")
+
+	// Use lightweight response for better performance (default behavior)
+	// Clients can opt-in to full response with ?light=false
+	// Full session data is always available via GET /session/{id}
+	if !light && r.URL.Query().Get("light") == "false" {
+		// Full response (includes MessageIDs array)
+		sessions, err := s.sessionManager.List(r.Context(), projectID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(sessions)
+		return
+	}
+
+	// Default: Use ListLight for fast response with metadata only
+	items, err := s.sessionManager.ListLight(r.Context(), projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessions)
+	json.NewEncoder(w).Encode(items)
 }
 
 func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
@@ -646,37 +663,10 @@ func (s *Server) handleMessagesStream(w http.ResponseWriter, r *http.Request) {
 
 // Agent stubs
 func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
-	// Return default built-in agents
-	agents := []map[string]interface{}{
-		{
-			"name":        "general",
-			"description": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
-			"mode":        "subagent",
-			"builtIn":     true,
-			"permission": map[string]interface{}{
-				"edit": "allow",
-				"bash": map[string]string{
-					"*": "allow",
-				},
-				"webfetch": "allow",
-			},
-			"tools":   map[string]bool{},
-			"options": map[string]interface{}{},
-		},
-		{
-			"name":    "build",
-			"mode":    "primary",
-			"builtIn": true,
-			"permission": map[string]interface{}{
-				"edit": "allow",
-				"bash": map[string]string{
-					"*": "allow",
-				},
-				"webfetch": "allow",
-			},
-			"tools":   map[string]bool{},
-			"options": map[string]interface{}{},
-		},
+	agents, err := agent.List()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -685,8 +675,18 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentsGet(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
+	agentInfo, err := agent.Get(agentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if agentInfo == nil {
+		http.Error(w, "Agent not found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": agentID})
+	json.NewEncoder(w).Encode(agentInfo)
 }
 
 // Command stubs

@@ -198,8 +198,10 @@ func defaultConfig() *Config {
 			Port: 8080,
 		},
 		Storage: StorageConfig{
-			// Storage goes in Data directory like the TypeScript version
-			Path: filepath.Join(Path.Data, "storage", "opencode.db"),
+			// Storage directory in XDG_DATA_HOME/opencode/storage
+			// (usually ~/.local/share/opencode/storage)
+			// This matches the TypeScript version structure
+			Path: filepath.Join(Path.Data, "storage"),
 		},
 		Providers: make(map[string]ProviderConfig),
 	}

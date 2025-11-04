@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/opencode/opencode-go/internal/config"
 	"github.com/opencode/opencode-go/internal/provider"
@@ -102,10 +103,9 @@ func exportMarkdown(sess *session.Session, messages []*session.Message) ([]byte,
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# Session: %s\n\n", sess.ID))
-	sb.WriteString(fmt.Sprintf("**Created:** %s\n", sess.CreatedAt.Format("2006-01-02 15:04:05")))
-	sb.WriteString(fmt.Sprintf("**Updated:** %s\n", sess.UpdatedAt.Format("2006-01-02 15:04:05")))
-	sb.WriteString(fmt.Sprintf("**Provider:** %s\n", sess.Provider))
-	sb.WriteString(fmt.Sprintf("**Model:** %s\n\n", sess.Model))
+	sb.WriteString(fmt.Sprintf("**Created:** %s\n", time.UnixMilli(sess.Time.Created).Format("2006-01-02 15:04:05")))
+	sb.WriteString(fmt.Sprintf("**Updated:** %s\n", time.UnixMilli(sess.Time.Updated).Format("2006-01-02 15:04:05")))
+	sb.WriteString(fmt.Sprintf("**Version:** %s\n\n", sess.Version))
 
 	if sess.Title != "" {
 		sb.WriteString(fmt.Sprintf("**Title:** %s\n\n", sess.Title))

@@ -4,18 +4,61 @@ import (
 	"time"
 )
 
+// Session matches the TypeScript Session.Info schema
 type Session struct {
-	ID         string                 `json:"id"`
-	ProjectID  string                 `json:"projectId"`
-	Title      string                 `json:"title"`
-	Model      string                 `json:"model"`
-	Provider   string                 `json:"provider"`
-	State      SessionState           `json:"state"`
-	Metadata   map[string]interface{} `json:"metadata"`
-	CreatedAt  time.Time              `json:"createdAt"`
-	UpdatedAt  time.Time              `json:"updatedAt"`
-	MessageIDs []string               `json:"messageIds"`         // Ordered list
-	ParentID   string                 `json:"parentId,omitempty"` // For forks
+	ID        string                 `json:"id"`
+	ProjectID string                 `json:"projectId"`
+	Directory string                 `json:"directory"`
+	Title     string                 `json:"title"`
+	Version   string                 `json:"version"` // OpenCode version, not model version
+	ParentID  string                 `json:"parentId,omitempty"`
+	Time      SessionTime            `json:"time"`
+	Share     *SessionShare          `json:"share,omitempty"`
+	Summary   *SessionSummary        `json:"summary,omitempty"`
+	Revert    *SessionRevert         `json:"revert,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+
+	// Additional fields for Go implementation (not in TypeScript schema)
+	// These are stored separately in metadata or inferred from messages
+	Provider   string    `json:"-"` // Not persisted, inferred from Version or metadata
+	Model      string    `json:"-"` // Not persisted, inferred from messages or metadata
+	MessageIDs []string  `json:"-"` // Not persisted in session, loaded from message storage
+	UpdatedAt  time.Time `json:"-"` // Helper for sorting, derived from Time.Updated
+}
+
+// SessionTime stores Unix millisecond timestamps
+type SessionTime struct {
+	Created    int64 `json:"created"`
+	Updated    int64 `json:"updated"`
+	Compacting int64 `json:"compacting,omitempty"`
+}
+
+type SessionShare struct {
+	URL string `json:"url"`
+}
+
+type SessionSummary struct {
+	Diffs []interface{} `json:"diffs"`
+}
+
+type SessionRevert struct {
+	MessageID string `json:"messageID"`
+	PartID    string `json:"partID,omitempty"`
+	Snapshot  string `json:"snapshot,omitempty"`
+	Diff      string `json:"diff,omitempty"`
+}
+
+// SessionListItem is a lightweight representation for listing sessions
+// This avoids loading full nested objects
+type SessionListItem struct {
+	ID           string `json:"id"`
+	ProjectID    string `json:"projectId"`
+	Title        string `json:"title"`
+	Version      string `json:"version"`
+	ParentID     string `json:"parentId,omitempty"`
+	Created      int64  `json:"created"`
+	Updated      int64  `json:"updated"`
+	MessageCount int    `json:"messageCount"`
 }
 
 type SessionState string
