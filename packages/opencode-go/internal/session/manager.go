@@ -9,11 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opencode/opencode-go/internal/provider"
 	"github.com/opencode/opencode-go/internal/storage"
 )
 
 type Manager struct {
-	storage *storage.Storage
+	storage          *storage.Storage
+	providerRegistry *provider.Registry
 
 	// In-memory cache for active sessions
 	sessions map[string]*Session
@@ -23,11 +25,12 @@ type Manager struct {
 	eventBus *EventBus
 }
 
-func NewManager(storage *storage.Storage) *Manager {
+func NewManager(storage *storage.Storage, providerRegistry *provider.Registry) *Manager {
 	return &Manager{
-		storage:  storage,
-		sessions: make(map[string]*Session),
-		eventBus: NewEventBus(),
+		storage:          storage,
+		providerRegistry: providerRegistry,
+		sessions:         make(map[string]*Session),
+		eventBus:         NewEventBus(),
 	}
 }
 

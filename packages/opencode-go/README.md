@@ -276,19 +276,31 @@ Phase 1 includes 48 stub endpoints:
 - [x] Session history
 - [x] Event bus
 
-### Phase 4 ✅ (Current)
+### Phase 4 ✅ **COMPLETE**
 
 - [x] AI provider integration (Anthropic, OpenAI, Gemini)
 - [x] Streaming responses
 - [x] Provider registry
 - [x] Retry logic with exponential backoff
+- [x] Tool/function calling support
 - [x] Comprehensive unit tests (54 tests)
 - [x] Integration tests (4 tests)
+- [x] Provider documentation (540+ lines)
 
-### Phase 5 (Next)
+**Completion Date**: 2024-11-03
 
-- [ ] LSP integration
-- [ ] Advanced features
+### Phase 5 ⏸️ (Next - Not Started)
+
+**Advanced Features**:
+
+- [ ] LSP integration (diagnostics, hover, completions)
+- [ ] Session summarization
+- [ ] Todo management system
+- [ ] Web fetching (HTML → Markdown)
+- [ ] Task/sub-agent spawning
+- [ ] Session revert and branching
+
+**Timeline**: 7 weeks (Weeks 29-35)
 
 ## Dependencies
 

@@ -90,11 +90,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	// Create session manager
-	sessionMgr := session.NewManager(store)
-
 	// Create provider registry
 	registry := provider.NewRegistry()
+
+	// Create session manager
+	sessionMgr := session.NewManager(store, registry)
 
 	// Initialize providers
 	ctx := context.Background()

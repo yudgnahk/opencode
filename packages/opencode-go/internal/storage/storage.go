@@ -40,7 +40,7 @@ func New(path string) (*Storage, error) {
 	// Create buckets
 	// This matches the structure in TypeScript: session, message, project
 	err = db.Update(func(tx *bolt.Tx) error {
-		buckets := []string{"sessions", "messages", "projects", "config"}
+		buckets := []string{"sessions", "messages", "projects", "config", "todos"}
 		for _, bucket := range buckets {
 			if _, err := tx.CreateBucketIfNotExists([]byte(bucket)); err != nil {
 				return err

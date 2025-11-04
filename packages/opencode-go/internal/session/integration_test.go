@@ -26,10 +26,10 @@ func TestCompletionServiceIntegration(t *testing.T) {
 		defer store.Close()
 
 		// Create session manager
-		sessionMgr := NewManager(store)
+		registry := provider.NewRegistry()
+		sessionMgr := NewManager(store, registry)
 
 		// Create provider registry
-		registry := provider.NewRegistry()
 
 		// Register mock provider
 		mockProvider := &mockProvider{
@@ -118,10 +118,10 @@ func TestCompletionServiceIntegration(t *testing.T) {
 		defer store.Close()
 
 		// Create session manager
-		sessionMgr := NewManager(store)
+		registry := provider.NewRegistry()
+		sessionMgr := NewManager(store, registry)
 
 		// Create provider registry
-		registry := provider.NewRegistry()
 
 		// Create mock stream
 		mockStream := &mockStream{
@@ -203,10 +203,10 @@ func TestCompletionServiceIntegration(t *testing.T) {
 		defer store.Close()
 
 		// Create session manager
-		sessionMgr := NewManager(store)
+		registry := provider.NewRegistry()
+		sessionMgr := NewManager(store, registry)
 
 		// Create provider registry
-		registry := provider.NewRegistry()
 
 		// Create counting provider that fails once then succeeds
 		attempts := 0
@@ -292,10 +292,10 @@ func TestCompletionServiceIntegration(t *testing.T) {
 		defer store.Close()
 
 		// Create session manager
-		sessionMgr := NewManager(store)
+		registry := provider.NewRegistry()
+		sessionMgr := NewManager(store, registry)
 
 		// Create provider registry (empty)
-		registry := provider.NewRegistry()
 
 		// Create completion service
 		completionSvc := NewCompletionService(sessionMgr, registry)

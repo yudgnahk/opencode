@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/opencode/opencode-go/internal/provider"
 	"github.com/opencode/opencode-go/internal/storage"
 )
 
@@ -26,7 +27,8 @@ func TestManager_Create(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	session, err := manager.Create(ctx, "test-project", "anthropic", "claude-3-opus")
@@ -59,7 +61,8 @@ func TestManager_Get(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session
@@ -87,7 +90,8 @@ func TestManager_List(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create multiple sessions
@@ -131,7 +135,8 @@ func TestManager_Update(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session
@@ -170,7 +175,8 @@ func TestManager_Delete(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session
@@ -196,7 +202,8 @@ func TestManager_AddMessage(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session
@@ -236,7 +243,8 @@ func TestManager_GetMessages(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session
@@ -281,7 +289,8 @@ func TestManager_Fork(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session with messages
@@ -355,7 +364,8 @@ func TestManager_GetHistory(t *testing.T) {
 	store := setupTestStorage(t)
 	defer store.Close()
 
-	manager := NewManager(store)
+	registry := provider.NewRegistry()
+	manager := NewManager(store, registry)
 	ctx := context.Background()
 
 	// Create a session with messages

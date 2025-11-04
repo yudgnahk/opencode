@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/opencode/opencode-go/internal/config"
+	"github.com/opencode/opencode-go/internal/provider"
 	"github.com/opencode/opencode-go/internal/session"
 	"github.com/opencode/opencode-go/internal/storage"
 	"github.com/spf13/cobra"
@@ -38,7 +39,8 @@ var exportCmd = &cobra.Command{
 		defer store.Close()
 
 		// Load session
-		sessionMgr := session.NewManager(store)
+		registry := provider.NewRegistry()
+		sessionMgr := session.NewManager(store, registry)
 		sess, err := sessionMgr.Get(ctx, sessionID)
 		if err != nil {
 			fmt.Printf("Error loading session: %v\n", err)

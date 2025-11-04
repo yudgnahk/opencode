@@ -32,11 +32,11 @@ func New(storage *storage.Storage, workingDir string) *Server {
 	// Detect project
 	proj, _ := project.Detect(workingDir)
 
-	// Create session manager
-	sessionMgr := session.NewManager(storage)
-
 	// Create provider registry
 	registry := provider.NewRegistry()
+
+	// Create session manager
+	sessionMgr := session.NewManager(storage, registry)
 
 	// Create completion service
 	completionSvc := session.NewCompletionService(sessionMgr, registry)
@@ -128,6 +128,13 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	r.Get("/session/{id}", s.handleSessionsGet)
 	r.Delete("/session/{id}", s.handleSessionsDelete)
 	r.Post("/session/{id}/fork", s.handleSessionsFork)
+	r.Post("/session/{id}/summarize", s.handleSessionsSummarize)
+
+	// Todos
+	r.Get("/session/{id}/todos", s.handleTodosGet)
+	r.Put("/session/{id}/todos", s.handleTodosUpdate)
+	r.Post("/session/{id}/todos", s.handleTodosAdd)
+	r.Patch("/session/{id}/todos/{todoId}", s.handleTodosUpdateStatus)
 
 	// Messages
 	r.Get("/session/{id}/messages", s.handleMessagesGet)
@@ -165,8 +172,10 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	r.Post("/bash/execute", s.handleBashExecute)
 
 	// LSP
-	r.Post("/lsp/diagnostics", s.handleLSPDiagnostics)
 	r.Post("/lsp/hover", s.handleLSPHover)
+	r.Post("/lsp/completion", s.handleLSPCompletion)
+	r.Post("/lsp/definition", s.handleLSPDefinition)
+	r.Post("/lsp/references", s.handleLSPReferences)
 
 	// Logging
 	r.Post("/log", s.handleLog)
@@ -335,6 +344,101 @@ func (s *Server) handleSessionsFork(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(forked)
+}
+
+func (s *Server) handleSessionsSummarize(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	summary, err := s.sessionManager.Summarize(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Summary string `json:"summary"`
+	}{
+		Summary: summary,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// Todo handlers
+func (s *Server) handleTodosGet(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	todos, err := s.sessionManager.GetTodos(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(todos)
+}
+
+func (s *Server) handleTodosUpdate(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		Todos []session.Todo `json:"todos"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.sessionManager.UpdateTodos(r.Context(), sessionID, req.Todos); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTodosAdd(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+
+	var req struct {
+		Content  string `json:"content"`
+		Priority string `json:"priority"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.sessionManager.AddTodo(r.Context(), sessionID, req.Content, req.Priority); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTodosUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	todoID := chi.URLParam(r, "todoId")
+
+	var req struct {
+		Status session.TodoStatus `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.sessionManager.UpdateTodoStatus(r.Context(), sessionID, todoID, req.Status); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // Message handlers
@@ -608,17 +712,74 @@ func (s *Server) handleBashExecute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// LSP stubs
-func (s *Server) handleLSPDiagnostics(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 5
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
-}
+// LSP handlers
 
 func (s *Server) handleLSPHover(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 5
+	var req tool.LSPHoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.LSPHover(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{})
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleLSPCompletion(w http.ResponseWriter, r *http.Request) {
+	var req tool.LSPCompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.LSPCompletion(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleLSPDefinition(w http.ResponseWriter, r *http.Request) {
+	var req tool.LSPDefinitionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.LSPDefinition(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleLSPReferences(w http.ResponseWriter, r *http.Request) {
+	var req tool.LSPReferencesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.tools.LSPReferences(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // Auth handlers
@@ -745,18 +906,6 @@ func (s *Server) handleAuthDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// Todo stubs
-func (s *Server) handleTodosGet(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 5
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
-}
-
-func (s *Server) handleTodosUpdate(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Phase 5
-	w.WriteHeader(http.StatusOK)
 }
 
 // Log handler
