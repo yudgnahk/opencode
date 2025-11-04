@@ -10,3 +10,10 @@ playground
 tmp
 dist
 .turbo
+bin/
+
+# claude files
+.claude
+docs/ai/*
+.ai-devkit.json
+CLAUDE.md

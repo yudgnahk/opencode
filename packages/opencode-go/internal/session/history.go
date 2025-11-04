@@ -55,7 +55,8 @@ func (m *Manager) Compact(ctx context.Context, sessionID string, keepLast int) e
 	// Delete old messages
 	toDelete := messages[:len(messages)-keepLast]
 	for _, msg := range toDelete {
-		m.storage.Delete("messages", msg.ID)
+		// Delete message: message/{sessionID}/{messageID}
+		m.storage.Delete([]string{"message", sessionID, msg.ID})
 	}
 
 	// Update session
@@ -66,5 +67,6 @@ func (m *Manager) Compact(ctx context.Context, sessionID string, keepLast int) e
 
 	session.MessageIDs = session.MessageIDs[len(toDelete):]
 
-	return m.storage.SetJSON("sessions", session.ID, session)
+	// Save session: session/{projectID}/{sessionID}
+	return m.storage.WriteJSON([]string{"session", session.ProjectID, session.ID}, session)
 }

@@ -28,8 +28,9 @@ const (
 
 // GetTodos retrieves todos for a session
 func (m *Manager) GetTodos(ctx context.Context, sessionID string) (*TodoList, error) {
-	var todos TodoList
-	if err := m.storage.GetJSON("todos", sessionID, &todos); err != nil {
+	var todos []Todo
+	// Read todos: todo/{sessionID}
+	if err := m.storage.ReadJSON([]string{"todo", sessionID}, &todos); err != nil {
 		// Return empty list if not found
 		return &TodoList{
 			SessionID: sessionID,
@@ -37,28 +38,27 @@ func (m *Manager) GetTodos(ctx context.Context, sessionID string) (*TodoList, er
 		}, nil
 	}
 
-	// Ensure SessionID is set even if data exists
-	if todos.SessionID == "" {
-		todos.SessionID = sessionID
-	}
-
 	// Ensure Todos slice is initialized
-	if todos.Todos == nil {
-		todos.Todos = []Todo{}
+	if todos == nil {
+		todos = []Todo{}
 	}
 
-	return &todos, nil
+	return &TodoList{
+		SessionID: sessionID,
+		Todos:     todos,
+	}, nil
 }
 
 // UpdateTodos updates the todo list for a session
 func (m *Manager) UpdateTodos(ctx context.Context, sessionID string, todos []Todo) error {
+	// Write todos: todo/{sessionID}
+	if err := m.storage.WriteJSON([]string{"todo", sessionID}, todos); err != nil {
+		return err
+	}
+
 	todoList := &TodoList{
 		SessionID: sessionID,
 		Todos:     todos,
-	}
-
-	if err := m.storage.SetJSON("todos", sessionID, todoList); err != nil {
-		return err
 	}
 
 	// Emit event

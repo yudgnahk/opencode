@@ -15,15 +15,14 @@ func (m *Manager) AddMessage(ctx context.Context, sessionID string, role Role, c
 	// Get session (must check cache first while holding lock)
 	session, ok := m.sessions[sessionID]
 	if !ok {
-		// Load from storage
-		var loaded Session
-		if err := m.storage.GetJSON("sessions", sessionID, &loaded); err != nil {
+		// Temporarily unlock to call Get (which handles locking internally)
+		m.mu.Unlock()
+		loaded, err := m.Get(ctx, sessionID)
+		m.mu.Lock()
+		if err != nil {
 			return nil, err
 		}
-		if loaded.ID == "" {
-			return nil, fmt.Errorf("session not found: %s", sessionID)
-		}
-		session = &loaded
+		session = loaded
 		m.sessions[sessionID] = session
 	}
 
@@ -36,8 +35,8 @@ func (m *Manager) AddMessage(ctx context.Context, sessionID string, role Role, c
 		Metadata:  make(map[string]interface{}),
 	}
 
-	// Save message
-	if err := m.storage.SetJSON("messages", message.ID, message); err != nil {
+	// Save message: message/{sessionID}/{messageID}
+	if err := m.storage.WriteJSON([]string{"message", sessionID, message.ID}, message); err != nil {
 		return nil, fmt.Errorf("failed to save message: %w", err)
 	}
 
@@ -45,7 +44,8 @@ func (m *Manager) AddMessage(ctx context.Context, sessionID string, role Role, c
 	session.MessageIDs = append(session.MessageIDs, message.ID)
 	session.UpdatedAt = time.Now()
 
-	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+	// Save session: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", session.ProjectID, session.ID}, session); err != nil {
 		return nil, err
 	}
 
@@ -70,7 +70,8 @@ func (m *Manager) GetMessages(ctx context.Context, sessionID string) ([]*Message
 
 	for _, msgID := range session.MessageIDs {
 		var msg Message
-		if err := m.storage.GetJSON("messages", msgID, &msg); err != nil {
+		// Read message: message/{sessionID}/{messageID}
+		if err := m.storage.ReadJSON([]string{"message", sessionID, msgID}, &msg); err != nil {
 			continue
 		}
 		messages = append(messages, &msg)
@@ -81,14 +82,41 @@ func (m *Manager) GetMessages(ctx context.Context, sessionID string) ([]*Message
 
 // UpdateMessage updates a message (for streaming)
 func (m *Manager) UpdateMessage(ctx context.Context, messageID string, content []ContentBlock) error {
-	var message Message
-	if err := m.storage.GetJSON("messages", messageID, &message); err != nil {
+	// We need to find the message by searching all sessions
+	// This is inefficient but necessary without knowing the sessionID
+	allSessions, err := m.List(ctx, "")
+	if err != nil {
 		return err
+	}
+
+	var message Message
+	var sessionID string
+	found := false
+
+	for _, session := range allSessions {
+		for _, msgID := range session.MessageIDs {
+			if msgID == messageID {
+				if err := m.storage.ReadJSON([]string{"message", session.ID, messageID}, &message); err != nil {
+					return err
+				}
+				sessionID = session.ID
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("message not found: %s", messageID)
 	}
 
 	message.Content = content
 
-	if err := m.storage.SetJSON("messages", messageID, &message); err != nil {
+	// Save message: message/{sessionID}/{messageID}
+	if err := m.storage.WriteJSON([]string{"message", sessionID, messageID}, &message); err != nil {
 		return err
 	}
 
@@ -104,29 +132,37 @@ func (m *Manager) UpdateMessage(ctx context.Context, messageID string, content [
 
 // DeleteMessage removes a message from a session
 func (m *Manager) DeleteMessage(ctx context.Context, messageID string) error {
-	var message Message
-	if err := m.storage.GetJSON("messages", messageID, &message); err != nil {
+	// Find the session containing this message
+	allSessions, err := m.List(ctx, "")
+	if err != nil {
 		return err
+	}
+
+	var sessionID string
+	var session *Session
+	found := false
+
+	for _, s := range allSessions {
+		for _, msgID := range s.MessageIDs {
+			if msgID == messageID {
+				session = s
+				sessionID = s.ID
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("message not found: %s", messageID)
 	}
 
 	// Lock to prevent race conditions when modifying session
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// Get session from cache
-	session, ok := m.sessions[message.SessionID]
-	if !ok {
-		// Load from storage
-		var loaded Session
-		if err := m.storage.GetJSON("sessions", message.SessionID, &loaded); err != nil {
-			return err
-		}
-		if loaded.ID == "" {
-			return fmt.Errorf("session not found: %s", message.SessionID)
-		}
-		session = &loaded
-		m.sessions[message.SessionID] = session
-	}
 
 	// Remove from session
 	newMessageIDs := make([]string, 0)
@@ -137,12 +173,13 @@ func (m *Manager) DeleteMessage(ctx context.Context, messageID string) error {
 	}
 	session.MessageIDs = newMessageIDs
 
-	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+	// Save session: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", session.ProjectID, session.ID}, session); err != nil {
 		return err
 	}
 
-	// Delete message
-	if err := m.storage.Delete("messages", messageID); err != nil {
+	// Delete message: message/{sessionID}/{messageID}
+	if err := m.storage.Delete([]string{"message", sessionID, messageID}); err != nil {
 		return err
 	}
 
@@ -159,14 +196,13 @@ func (m *Manager) Revert(ctx context.Context, sessionID string, messageID string
 	session, ok := m.sessions[sessionID]
 	if !ok {
 		// Load from storage
-		var loaded Session
-		if err := m.storage.GetJSON("sessions", sessionID, &loaded); err != nil {
+		m.mu.Unlock()
+		loaded, err := m.Get(ctx, sessionID)
+		m.mu.Lock()
+		if err != nil {
 			return err
 		}
-		if loaded.ID == "" {
-			return fmt.Errorf("session not found: %s", sessionID)
-		}
-		session = &loaded
+		session = loaded
 		m.sessions[sessionID] = session
 	}
 
@@ -192,9 +228,9 @@ func (m *Manager) Revert(ctx context.Context, sessionID string, messageID string
 	// Get messages to delete
 	messagesToDelete := session.MessageIDs[cutoffIndex:]
 
-	// Delete messages from storage
+	// Delete messages from storage: message/{sessionID}/{messageID}
 	for _, id := range messagesToDelete {
-		if err := m.storage.Delete("messages", id); err != nil {
+		if err := m.storage.Delete([]string{"message", sessionID, id}); err != nil {
 			// Continue even if delete fails
 			continue
 		}
@@ -204,7 +240,8 @@ func (m *Manager) Revert(ctx context.Context, sessionID string, messageID string
 	session.MessageIDs = session.MessageIDs[:cutoffIndex]
 	session.UpdatedAt = time.Now()
 
-	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+	// Save session: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", session.ProjectID, session.ID}, session); err != nil {
 		return err
 	}
 

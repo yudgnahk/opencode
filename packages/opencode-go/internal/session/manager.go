@@ -54,8 +54,8 @@ func (m *Manager) Create(ctx context.Context, projectID, provider, model string)
 		MessageIDs: []string{},
 	}
 
-	// Save to storage
-	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+	// Save to storage with hierarchical path: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", projectID, session.ID}, session); err != nil {
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
 
@@ -75,6 +75,7 @@ func (m *Manager) Create(ctx context.Context, projectID, provider, model string)
 }
 
 // Get retrieves a session by ID
+// Note: This requires knowing the projectID. For now, we search all projects.
 func (m *Manager) Get(ctx context.Context, id string) (*Session, error) {
 	// Check cache first
 	m.mu.RLock()
@@ -85,27 +86,39 @@ func (m *Manager) Get(ctx context.Context, id string) (*Session, error) {
 		return session, nil
 	}
 
-	// Load from storage
-	var loaded Session
-	if err := m.storage.GetJSON("sessions", id, &loaded); err != nil {
+	// We need to search across projects since we don't know the projectID
+	// List all sessions and find the matching one
+	allSessions, err := m.List(ctx, "")
+	if err != nil {
 		return nil, err
 	}
 
-	if loaded.ID == "" {
-		return nil, fmt.Errorf("session not found: %s", id)
+	for _, s := range allSessions {
+		if s.ID == id {
+			// Add to cache
+			m.mu.Lock()
+			m.sessions[id] = s
+			m.mu.Unlock()
+			return s, nil
+		}
 	}
 
-	// Add to cache
-	m.mu.Lock()
-	m.sessions[id] = &loaded
-	m.mu.Unlock()
-
-	return &loaded, nil
+	return nil, fmt.Errorf("session not found: %s", id)
 }
 
 // List returns all sessions for a project
 func (m *Manager) List(ctx context.Context, projectID string) ([]*Session, error) {
-	keys, err := m.storage.List("sessions")
+	var keys [][]string
+	var err error
+
+	if projectID != "" {
+		// List sessions for specific project: session/{projectID}/*
+		keys, err = m.storage.List([]string{"session", projectID})
+	} else {
+		// List all sessions: session/*/*
+		keys, err = m.storage.List([]string{"session"})
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +126,7 @@ func (m *Manager) List(ctx context.Context, projectID string) ([]*Session, error
 	sessions := make([]*Session, 0)
 	for _, key := range keys {
 		var session Session
-		if err := m.storage.GetJSON("sessions", key, &session); err != nil {
+		if err := m.storage.ReadJSON(key, &session); err != nil {
 			continue
 		}
 
@@ -147,8 +160,8 @@ func (m *Manager) Update(ctx context.Context, id string, updates map[string]inte
 
 	session.UpdatedAt = time.Now()
 
-	// Save
-	if err := m.storage.SetJSON("sessions", session.ID, session); err != nil {
+	// Save with hierarchical path: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", session.ProjectID, session.ID}, session); err != nil {
 		return err
 	}
 
@@ -164,20 +177,26 @@ func (m *Manager) Update(ctx context.Context, id string, updates map[string]inte
 
 // Delete deletes a session
 func (m *Manager) Delete(ctx context.Context, id string) error {
+	// Get session to find its projectID
+	session, err := m.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
 	// Remove from cache
 	m.mu.Lock()
 	delete(m.sessions, id)
 	m.mu.Unlock()
 
-	// Remove from storage
-	if err := m.storage.Delete("sessions", id); err != nil {
+	// Remove from storage: session/{projectID}/{sessionID}
+	if err := m.storage.Delete([]string{"session", session.ProjectID, id}); err != nil {
 		return err
 	}
 
-	// Delete all messages
+	// Delete all messages: message/{sessionID}/*
 	messages, _ := m.GetMessages(ctx, id)
 	for _, msg := range messages {
-		m.storage.Delete("messages", msg.ID)
+		m.storage.Delete([]string{"message", id, msg.ID})
 	}
 
 	// Emit event
@@ -224,8 +243,8 @@ func (m *Manager) Fork(ctx context.Context, id string, fromMessageID string) (*S
 		}
 	}
 
-	// Save
-	if err := m.storage.SetJSON("sessions", forked.ID, forked); err != nil {
+	// Save with hierarchical path: session/{projectID}/{sessionID}
+	if err := m.storage.WriteJSON([]string{"session", forked.ProjectID, forked.ID}, forked); err != nil {
 		return nil, err
 	}
 
