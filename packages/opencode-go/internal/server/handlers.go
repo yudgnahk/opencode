@@ -281,6 +281,11 @@ func (s *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("projectId")
 
+	// Default to current project if not specified (matches TypeScript behavior)
+	if projectID == "" && s.project != nil {
+		projectID = s.project.ID
+	}
+
 	sessions, err := s.sessionManager.List(r.Context(), projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

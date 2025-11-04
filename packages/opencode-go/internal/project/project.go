@@ -1,10 +1,10 @@
 package project
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -29,15 +29,22 @@ func Detect(path string) (*Project, error) {
 
 	name := filepath.Base(absPath)
 
-	project := &Project{
-		ID:   generateID(absPath),
-		Path: absPath,
-		Name: name,
+	// Detect git repository first
+	gitInfo := detectGit(absPath)
+
+	// Generate ID from git root if available
+	var projectID string
+	if gitInfo != nil {
+		projectID = generateID(gitInfo.Root)
+	} else {
+		projectID = "global"
 	}
 
-	// Detect git repository
-	if gitInfo := detectGit(absPath); gitInfo != nil {
-		project.Git = gitInfo
+	project := &Project{
+		ID:   projectID,
+		Path: absPath,
+		Name: name,
+		Git:  gitInfo,
 	}
 
 	return project, nil
@@ -98,7 +105,28 @@ func getCurrentBranch(gitDir string) string {
 	return "detached"
 }
 
-func generateID(path string) string {
-	hash := sha256.Sum256([]byte(path))
-	return fmt.Sprintf("%x", hash[:8])
+func generateID(gitRoot string) string {
+	// Match TypeScript behavior: git rev-list --max-parents=0 --all
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "--all")
+	cmd.Dir = gitRoot
+	output, err := cmd.Output()
+	if err != nil {
+		return "global"
+	}
+
+	// Split by newlines, filter empty, trim, and sort
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var commits []string
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			commits = append(commits, trimmed)
+		}
+	}
+
+	if len(commits) == 0 {
+		return "global"
+	}
+
+	sort.Strings(commits)
+	return commits[0]
 }
