@@ -103,7 +103,7 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Delete it
-	err = store.Delete("sessions", testKey)
+	err = store.Delete([]string{"sessions", testKey})
 	if err != nil {
 		t.Fatalf("Failed to delete: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestList(t *testing.T) {
 	}
 
 	// List all keys
-	keys, err := store.List("sessions")
+	keys, err := store.List([]string{"sessions"})
 	if err != nil {
 		t.Fatalf("Failed to list keys: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestList(t *testing.T) {
 	// Verify all keys are present
 	keyMap := make(map[string]bool)
 	for _, k := range keys {
-		keyMap[k] = true
+		keyMap[k[1]] = true
 	}
 
 	for k := range items {
@@ -250,7 +250,7 @@ func TestListEmptyBucket(t *testing.T) {
 	defer store.Close()
 
 	// List empty bucket
-	keys, err := store.List("sessions")
+	keys, err := store.List([]string{"sessions"})
 	if err != nil {
 		t.Fatalf("Failed to list empty bucket: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Verify all writes succeeded
-	keys, err := store.List("sessions")
+	keys, err := store.List([]string{"sessions"})
 	if err != nil {
 		t.Fatal(err)
 	}

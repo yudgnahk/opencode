@@ -342,46 +342,16 @@ func TestGetCurrentBranch_NoHEAD(t *testing.T) {
 }
 
 func TestGenerateID(t *testing.T) {
-	testCases := []struct {
-		path1 string
-		path2 string
-		same  bool
-	}{
-		{
-			path1: "/tmp/project1",
-			path2: "/tmp/project1",
-			same:  true,
-		},
-		{
-			path1: "/tmp/project1",
-			path2: "/tmp/project2",
-			same:  false,
-		},
-		{
-			path1: "/home/user/project",
-			path2: "/home/user/project",
-			same:  true,
-		},
+	// Test with non-git directories (should return "global")
+	id1 := generateID("/tmp/no-git")
+	if id1 != "global" {
+		t.Errorf("Expected 'global' for non-git path, got %s", id1)
 	}
 
-	for _, tc := range testCases {
-		id1 := generateID(tc.path1)
-		id2 := generateID(tc.path2)
-
-		if tc.same {
-			if id1 != id2 {
-				t.Errorf("Expected same ID for %s and %s, got %s and %s", tc.path1, tc.path2, id1, id2)
-			}
-		} else {
-			if id1 == id2 {
-				t.Errorf("Expected different IDs for %s and %s, got %s", tc.path1, tc.path2, id1)
-			}
-		}
-
-		// Check ID format (should be 16 hex characters)
-		if len(id1) != 16 {
-			t.Errorf("Expected ID length 16, got %d for %s", len(id1), id1)
-		}
+	// Test deterministic behavior for same path
+	id2 := generateID("/tmp/no-git")
+	if id1 != id2 {
+		t.Errorf("Expected same ID for same path, got %s and %s", id1, id2)
 	}
 }
 
