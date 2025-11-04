@@ -1,6 +1,7 @@
 package session
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -68,10 +69,27 @@ func (eb *EventBus) Publish(event Event) {
 	event.Timestamp = time.Now()
 
 	eb.mu.RLock()
-	subscribers := eb.subscribers[event.SessionID]
+	// Get both session-specific subscribers and wildcard subscribers
+	sessionSubs := eb.subscribers[event.SessionID]
+	wildcardSubs := eb.subscribers["*"]
 	eb.mu.RUnlock()
 
-	for _, ch := range subscribers {
+	// Debug: log event publication
+	log.Printf("DEBUG [EventBus]: Publishing event %s for session %s to %d session subs and %d wildcard subs",
+		event.Type, event.SessionID, len(sessionSubs), len(wildcardSubs))
+
+	// Send to session-specific subscribers
+	for _, ch := range sessionSubs {
+		select {
+		case ch <- event:
+			// Sent successfully
+		default:
+			// Channel full, skip (client too slow)
+		}
+	}
+
+	// Send to wildcard subscribers (for SSE clients)
+	for _, ch := range wildcardSubs {
 		select {
 		case ch <- event:
 			// Sent successfully

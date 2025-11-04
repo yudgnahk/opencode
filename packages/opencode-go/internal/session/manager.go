@@ -96,14 +96,8 @@ func (m *Manager) rebuildIndex() {
 			m.sessionIndex[session.ProjectID] = make(map[string]*SessionListItem)
 		}
 
-		// Count messages by listing message files
-		messageCount := 0
-		if session.ID != "" {
-			msgFiles, err := m.storage.ListInfo([]string{"message", session.ID})
-			if err == nil {
-				messageCount = len(msgFiles)
-			}
-		}
+		// Use MessageIDs length from session instead of expensive ListInfo call
+		messageCount := len(session.MessageIDs)
 
 		m.sessionIndex[session.ProjectID][session.ID] = &SessionListItem{
 			ID:           session.ID,
@@ -129,12 +123,9 @@ func (m *Manager) updateIndex(session *Session) {
 		m.sessionIndex[session.ProjectID] = make(map[string]*SessionListItem)
 	}
 
-	// Count messages by listing message files
-	messageCount := 0
-	if session.ID != "" {
-		msgFiles, _ := m.storage.ListInfo([]string{"message", session.ID})
-		messageCount = len(msgFiles)
-	}
+	// Use MessageIDs length instead of expensive ListInfo call
+	// This avoids the synchronous file system scan on every update
+	messageCount := len(session.MessageIDs)
 
 	m.sessionIndex[session.ProjectID][session.ID] = &SessionListItem{
 		ID:           session.ID,
@@ -372,6 +363,20 @@ func (m *Manager) Update(ctx context.Context, id string, updates map[string]inte
 	// Apply updates
 	if title, ok := updates["title"].(string); ok {
 		session.Title = title
+	}
+	if provider, ok := updates["provider"].(string); ok {
+		session.Provider = provider
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["provider"] = provider
+	}
+	if model, ok := updates["model"].(string); ok {
+		session.Model = model
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["model"] = model
 	}
 
 	session.Time.Updated = time.Now().UnixMilli()

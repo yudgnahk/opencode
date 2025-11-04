@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/opencode/opencode-go/internal/provider"
 )
@@ -62,8 +63,15 @@ func (s *CompletionService) SendMessage(ctx context.Context, sessionID, content 
 
 	req := s.buildCompletionRequest(sess, messages)
 
+	// Log the request details
+	fmt.Printf("DEBUG [CompletionService]: Sending completion request - Provider: %s, Model: %s, Messages: %d\n",
+		sess.Provider, sess.Model, len(req.Messages))
+
 	// Call provider
+	startAPI := time.Now()
 	resp, err := prov.Complete(ctx, req)
+	apiDuration := time.Since(startAPI)
+	fmt.Printf("DEBUG [Completion]: API call took %v\n", apiDuration)
 	if err != nil {
 		s.manager.Update(ctx, sessionID, map[string]interface{}{
 			"state": StateError,
@@ -90,10 +98,19 @@ func (s *CompletionService) SendMessage(ctx context.Context, sessionID, content 
 		"stopReason": resp.StopReason,
 	}
 
+	// Save the updated message with metadata
+	if err := s.manager.storage.WriteJSON([]string{"message", sessionID, assistantMsg.ID}, assistantMsg); err != nil {
+		return fmt.Errorf("failed to update message metadata: %w", err)
+	}
+
 	// Update state
 	s.manager.Update(ctx, sessionID, map[string]interface{}{
 		"state": StateIdle,
 	})
+
+	totalDuration := time.Since(startAPI)
+	fmt.Printf("DEBUG [Completion]: Total completion time: %v (API: %v, Post-processing: %v)\n",
+		totalDuration, apiDuration, totalDuration-apiDuration)
 
 	return nil
 }

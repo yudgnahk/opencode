@@ -59,6 +59,16 @@ func (m *Manager) AddMessage(ctx context.Context, sessionID string, role Role, c
 	return message, nil
 }
 
+// GetMessage retrieves a single message by ID
+func (m *Manager) GetMessage(ctx context.Context, sessionID string, messageID string) (*Message, error) {
+	var msg Message
+	// Read message: message/{sessionID}/{messageID}
+	if err := m.storage.ReadJSON([]string{"message", sessionID, messageID}, &msg); err != nil {
+		return nil, fmt.Errorf("message not found: %w", err)
+	}
+	return &msg, nil
+}
+
 // GetMessages retrieves all messages for a session
 func (m *Manager) GetMessages(ctx context.Context, sessionID string) ([]*Message, error) {
 	session, err := m.Get(ctx, sessionID)

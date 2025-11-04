@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -13,24 +14,22 @@ import (
 )
 
 func main() {
-	// Initialize config
-	cfg, err := config.Load()
+	// Initialize config (not strictly needed but loads XDG paths)
+	_, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Warning: Failed to load config: %v", err)
 	}
 
-	// Initialize storage
-	storageDir := filepath.Join(cfg.DataDir, "storage")
+	// Initialize storage using XDG data directory
+	storageDir := filepath.Join(config.Path.Data, "storage")
 	st, err := storage.New(storageDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
+	defer st.Close()
 
 	// Initialize provider registry (needed for session manager)
-	registry, err := provider.NewRegistry(cfg)
-	if err != nil {
-		log.Fatalf("Failed to initialize provider registry: %v", err)
-	}
+	registry := provider.NewRegistry()
 
 	// Delete old index file
 	indexPath := filepath.Join(storageDir, "_index", "sessions.json")
@@ -45,6 +44,10 @@ func main() {
 	mgr := session.NewManager(st, registry)
 
 	// Get session count to verify
-	sessions := mgr.ListLight("", nil)
+	ctx := context.Background()
+	sessions, err := mgr.ListLight(ctx, "")
+	if err != nil {
+		log.Fatalf("Failed to list sessions: %v", err)
+	}
 	fmt.Printf("Index rebuilt successfully! Found %d sessions\n", len(sessions))
 }

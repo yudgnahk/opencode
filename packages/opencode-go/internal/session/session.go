@@ -20,10 +20,10 @@ type Session struct {
 
 	// Additional fields for Go implementation (not in TypeScript schema)
 	// These are stored separately in metadata or inferred from messages
-	Provider   string    `json:"-"` // Not persisted, inferred from Version or metadata
-	Model      string    `json:"-"` // Not persisted, inferred from messages or metadata
-	MessageIDs []string  `json:"-"` // Not persisted in session, loaded from message storage
-	UpdatedAt  time.Time `json:"-"` // Helper for sorting, derived from Time.Updated
+	Provider   string    `json:"provider,omitempty"` // Exposed for backward compatibility with tests/legacy API
+	Model      string    `json:"model,omitempty"`    // Exposed for backward compatibility with tests/legacy API
+	MessageIDs []string  `json:"-"`                  // Not persisted in session, loaded from message storage
+	UpdatedAt  time.Time `json:"-"`                  // Helper for sorting, derived from Time.Updated
 }
 
 // SessionTime stores Unix millisecond timestamps

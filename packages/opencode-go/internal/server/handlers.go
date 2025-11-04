@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -135,7 +136,7 @@ func (s *Server) InitProviders(ctx context.Context) error {
 	authInfo, err := auth.Get("github-copilot")
 	if err == nil && authInfo != nil {
 		if oauthAuth, ok := authInfo.(auth.OAuth); ok && oauthAuth.Access != "" {
-			copilot := provider.NewGitHubCopilot(oauthAuth.Access)
+			copilot := provider.NewGitHubCopilotWithProviderID(oauthAuth.Access, "github-copilot")
 			copilot.SetModelsDevRegistry(s.modelsDevRegistry)
 			wrapped := provider.NewRetryableProvider(copilot, retryConfig)
 			if err := registerProvider(wrapped); err != nil {
@@ -189,8 +190,9 @@ func (s *Server) RegisterRoutes(r chi.Router) {
 	r.Post("/session/{id}/task", s.handleTaskExecute)
 
 	// Messages
-	r.Get("/session/{id}/messages", s.handleMessagesGet)
-	r.Post("/session/{id}/messages", s.handleMessagesCreate)
+	r.Get("/session/{id}/message", s.handleMessagesGet)
+	r.Post("/session/{id}/message", s.handleMessagesCreate)
+	r.Get("/session/{id}/message/{messageID}", s.handleMessageGet)
 	r.Get("/session/{id}/stream", s.handleMessagesStream)
 
 	// AI Completions
@@ -577,6 +579,20 @@ func (s *Server) handleTaskExecute(w http.ResponseWriter, r *http.Request) {
 }
 
 // Message handlers
+func (s *Server) handleMessageGet(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	messageID := chi.URLParam(r, "messageID")
+
+	message, err := s.sessionManager.GetMessage(r.Context(), sessionID, messageID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(message)
+}
+
 func (s *Server) handleMessagesGet(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 
@@ -594,23 +610,105 @@ func (s *Server) handleMessagesCreate(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 
 	var req struct {
-		Role    session.Role           `json:"role"`
-		Content []session.ContentBlock `json:"content"`
+		Parts     []json.RawMessage `json:"parts"`
+		MessageID string            `json:"messageID"`
+		Model     struct {
+			ProviderID string `json:"providerID"`
+			ModelID    string `json:"modelID"`
+		} `json:"model"`
+		Agent   string          `json:"agent"`
+		NoReply bool            `json:"noReply"`
+		System  string          `json:"system"`
+		Tools   map[string]bool `json:"tools"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	message, err := s.sessionManager.AddMessage(r.Context(), sessionID, req.Role, req.Content)
+	// Extract text content from parts
+	content := ""
+	for _, part := range req.Parts {
+		var partData struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(part, &partData); err == nil && partData.Type == "text" {
+			content += partData.Text + " "
+		}
+	}
+
+	// If noReply is true, just create the message without AI response
+	if req.NoReply {
+		userContent := []session.ContentBlock{{
+			Type: "text",
+			Text: content,
+		}}
+		message, err := s.sessionManager.AddMessage(r.Context(), sessionID, session.RoleUser, userContent)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(message)
+		return
+	}
+
+	// Update session with provider and model if provided
+	if req.Model.ProviderID != "" {
+		updates := map[string]interface{}{
+			"provider": req.Model.ProviderID,
+		}
+		if req.Model.ModelID != "" {
+			updates["model"] = req.Model.ModelID
+		}
+		if err := s.sessionManager.Update(r.Context(), sessionID, updates); err != nil {
+			log.Printf("Error updating session %s: %v", sessionID, err)
+			http.Error(w, fmt.Sprintf("failed to update session: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Verify session has a provider before attempting completion
+	sess, err := s.sessionManager.Get(r.Context(), sessionID)
+	if err != nil {
+		log.Printf("Error getting session %s: %v", sessionID, err)
+		http.Error(w, fmt.Sprintf("session not found: %v", err), http.StatusNotFound)
+		return
+	}
+	if sess.Provider == "" {
+		log.Printf("No provider set for session %s", sessionID)
+		http.Error(w, "provider not set: please specify a provider and model in the request", http.StatusBadRequest)
+		return
+	}
+
+	// Send message and trigger AI completion
+	log.Printf("DEBUG [Handler]: Calling completionService.SendMessage for session %s", sessionID)
+	if err := s.completionService.SendMessage(r.Context(), sessionID, content); err != nil {
+		log.Printf("Completion failed for session %s: %v", sessionID, err)
+		http.Error(w, fmt.Sprintf("completion failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("DEBUG [Handler]: completionService.SendMessage completed successfully")
+
+	// Get the latest message (the AI response)
+	messages, err := s.sessionManager.GetMessages(r.Context(), sessionID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	if len(messages) == 0 {
+		http.Error(w, "no messages found", http.StatusInternalServerError)
+		return
+	}
+
+	lastMessage := messages[len(messages)-1]
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(message)
+	json.NewEncoder(w).Encode(lastMessage)
 }
 
 func (s *Server) handleMessagesStream(w http.ResponseWriter, r *http.Request) {
@@ -1119,10 +1217,10 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 
 // Event handler
 func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement event streaming
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1130,19 +1228,134 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Keep connection open
+	// Send initial connection event
+	connectedEvent := map[string]interface{}{
+		"type":       "server.connected",
+		"properties": map[string]interface{}{},
+	}
+	data, _ := json.Marshal(connectedEvent)
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+
+	// Subscribe to all session events
+	eventChan := s.sessionManager.EventBus().SubscribeAll()
+	defer s.sessionManager.EventBus().Unsubscribe("*", eventChan)
+
+	// Keep connection open and stream events
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	log.Println("SSE client connected")
+
 	for {
 		select {
+		case event := <-eventChan:
+			log.Printf("DEBUG [SSE]: Received event %s for session %s", event.Type, event.SessionID)
+			// Convert internal event to API format
+			apiEvent := s.convertToAPIEvent(event)
+			data, err := json.Marshal(apiEvent)
+			if err != nil {
+				log.Printf("Error marshaling event: %v", err)
+				continue
+			}
+			log.Printf("DEBUG [SSE]: Sending event to client: %s", string(data))
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
 		case <-ticker.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-r.Context().Done():
+			log.Println("SSE client disconnected")
 			return
 		}
 	}
+}
+
+// convertToAPIEvent converts internal session events to API event format
+func (s *Server) convertToAPIEvent(event session.Event) map[string]interface{} {
+	// Map internal event types to API event types expected by TUI
+	var eventType string
+	switch event.Type {
+	case session.EventMessageAdded:
+		eventType = "message.updated" // TUI expects message.updated for new messages
+	case session.EventMessageUpdated:
+		eventType = "message.updated"
+	case session.EventMessageDeleted:
+		eventType = "message.removed"
+	case session.EventSessionCreated:
+		eventType = "session.created"
+	case session.EventSessionUpdated:
+		eventType = "session.updated"
+	case session.EventSessionDeleted:
+		eventType = "session.deleted"
+	default:
+		eventType = string(event.Type)
+	}
+
+	// Convert message data if present
+	properties := map[string]interface{}{}
+	if msg, ok := event.Data.(*session.Message); ok {
+		properties["info"] = s.convertMessageToAPI(msg)
+	} else if sess, ok := event.Data.(*session.Session); ok {
+		properties["info"] = sess
+	} else {
+		properties = map[string]interface{}{
+			"sessionID": event.SessionID,
+		}
+	}
+
+	return map[string]interface{}{
+		"type":       eventType,
+		"properties": properties,
+	}
+}
+
+// convertMessageToAPI converts internal message format to API format
+func (s *Server) convertMessageToAPI(msg *session.Message) map[string]interface{} {
+	apiMsg := map[string]interface{}{
+		"id":        msg.ID,
+		"sessionID": msg.SessionID,
+		"role":      msg.Role,
+		"time": map[string]interface{}{
+			"created": msg.CreatedAt.UnixMilli(),
+		},
+		"content": msg.Content, // Add content field
+	}
+
+	// Add assistant-specific fields
+	if msg.Role == session.RoleAssistant {
+		tokens := map[string]interface{}{
+			"input":     0,
+			"output":    0,
+			"reasoning": 0,
+			"cache": map[string]interface{}{
+				"read":  0,
+				"write": 0,
+			},
+		}
+		if usage, ok := msg.Metadata["usage"].(map[string]interface{}); ok {
+			if input, ok := usage["inputTokens"].(int); ok {
+				tokens["input"] = input
+			}
+			if output, ok := usage["outputTokens"].(int); ok {
+				tokens["output"] = output
+			}
+		}
+
+		apiMsg["tokens"] = tokens
+		apiMsg["cost"] = 0.0
+		apiMsg["modelID"] = ""
+		apiMsg["providerID"] = ""
+		apiMsg["system"] = []string{}
+		apiMsg["parentID"] = ""
+		apiMsg["mode"] = "build"
+		apiMsg["path"] = map[string]interface{}{
+			"cwd":  "",
+			"root": "",
+		}
+	}
+
+	return apiMsg
 }
 
 // TUI Control handlers
