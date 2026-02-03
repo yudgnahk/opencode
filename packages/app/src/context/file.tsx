@@ -65,6 +65,21 @@ function stripQueryAndHash(input: string) {
   return input
 }
 
+function decodeFilePath(input: string) {
+  try {
+    return decodeURIComponent(input)
+  } catch {
+    return input
+  }
+}
+
+function encodeFilePath(filepath: string): string {
+  return filepath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")
+}
+
 function unquoteGitPath(input: string) {
   if (!input.startsWith('"')) return input
   if (!input.endsWith('"')) return input
@@ -283,7 +298,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       const root = directory()
       const prefix = root.endsWith("/") ? root : root + "/"
 
-      let path = unquoteGitPath(stripQueryAndHash(stripFileProtocol(input)))
+      let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input))))
 
       if (path.startsWith(prefix)) {
         path = path.slice(prefix.length)
@@ -306,7 +321,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     function tab(input: string) {
       const path = normalize(input)
-      return `file://${path}`
+      return `file://${encodeFilePath(path)}`
     }
 
     function pathFromTab(tabValue: string) {

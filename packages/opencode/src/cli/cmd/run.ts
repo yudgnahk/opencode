@@ -1,5 +1,6 @@
 import type { Argv } from "yargs"
 import path from "path"
+import { pathToFileURL } from "bun"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
 import { Flag } from "../../flag/flag"
@@ -119,7 +120,7 @@ export const RunCommand = cmd({
 
         fileParts.push({
           type: "file",
-          url: `file://${resolvedPath}`,
+          url: pathToFileURL(resolvedPath).href,
           filename: path.basename(resolvedPath),
           mime,
         })

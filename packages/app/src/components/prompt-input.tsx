@@ -72,6 +72,14 @@ type PendingPrompt = {
 
 const pending = new Map<string, PendingPrompt>()
 
+function pathToFileUrl(filepath: string, query?: string): string {
+  const encodedPath = filepath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")
+  return `file://${encodedPath}${query ?? ""}`
+}
+
 interface PromptInputProps {
   class?: string
   ref?: (el: HTMLDivElement) => void
@@ -1320,7 +1328,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         id: Identifier.ascending("part"),
         type: "file" as const,
         mime: "text/plain",
-        url: `file://${absolute}${query}`,
+        url: pathToFileUrl(absolute, query),
         filename: getFilename(attachment.path),
         source: {
           type: "file" as const,
@@ -1383,7 +1391,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const addContextFile = (input: { path: string; selection?: FileSelection; comment?: string }) => {
       const absolute = toAbsolutePath(input.path)
       const query = input.selection ? `?start=${input.selection.startLine}&end=${input.selection.endLine}` : ""
-      const url = `file://${absolute}${query}`
+      const url = pathToFileUrl(absolute, query)
 
       const comment = input.comment?.trim()
       if (!comment && usedUrls.has(url)) return
